@@ -17,13 +17,16 @@ Installable as a PWA (iPhone: **Safari only** → Share → Add to Home Screen; 
 
 ## Adaptive selection
 
-Word lists are ordered by conversational frequency (wordfreq top 3,000, three tiers). Each category starts with its 40 most common words:
+Word lists are ordered by conversational frequency (wordfreq top 1,500, filtered to mechanically demanding words and split into difficulty tiers).
 
-- Words tapped as **hard** on the end-of-set screen appear **3×** as often and can't retire until the flag cools down (one level per clean set appearance)
-- **5 exposures** with no hard mark → the word graduates to a review pool that still gets **10%** of picks
-- When fewer than 25 un-graduated words remain, the next 15 most-common words unlock
+- **Warm-up words** are spread across difficulty tiers (`TIER_MIX`) and weighted within each tier by your 1–5 sound-category ratings
+- **A five-level check-in** ("How was that?") is asked at the first warm-up break of the day and at the end of a session — the day's first, then every third session. The answer shifts a persisted difficulty dial (`diffAdj`, −2…+2) that steers both the warm-up tier mix and the sentence ladder
+- **Sentence sets** guarantee every scenario pack a slot per set, with Doctor and Restaurant weighted higher (`SCEN_EMPHASIS`)
+- **Sentences play 50% faster** per word than the warm-up words (`SENT_PACE`) off the same single pace slider
 
-Tuning constants at the top of `src/App.jsx` (`GRAD_X`, `HARD_BOOST`, `REVIEW_P`, `ACTIVE_START`, `ACTIVE_MIN`, `ACTIVE_STEP`).
+Hard-word marking (tap the words that were hard → they return 3× as often) is **built but paused** — see "Paused features" in `tongue-and-groove.md`. Flip `HARD_MARKS` in `src/App.jsx` to bring it back.
+
+Tuning constants at the top of `src/App.jsx` (`HARD_MARKS`, `HARD_BOOST`, `RECENT_GAP`, `SENT_PACE`, `DIFF_ASK_EVERY`, `SCEN_EMPHASIS`, `TIER_MIX`).
 
 ## Mobile hardening
 

@@ -5,22 +5,33 @@ import { loadState, saveState, dkey } from "./storage.js";
 
 const saved = loadState();
 
-// Difficulty check-in — asked right after the first warm-up words (CB
-// 2026-08-05), then at most once every DIFF_ASK_GAP banked sets (a nudge,
-// never a nag). Easy/Too hard answers shift the warm-up tier mix up or down.
-// Pairs mode has no warm-up break, so its check-in stays on the summary.
-const DIFF_ASK_GAP = 6;
+// Difficulty check-in — five levels, and the only feedback the app asks for
+// now that hard-word marking is paused (see HARD_MARKS below). Two ask points
+// (CB 2026-08-09):
+//   1. the first warm-up break of the DAY — that answer tunes the three
+//      sentence sets that follow, so it has to land before them;
+//   2. the end of a finished session — first session of the day, then once
+//      every DIFF_ASK_EVERY sessions after it.
+// Both gates are day-scoped so a heavy user answering six sessions a day gets
+// asked twice on session one and then roughly every third session — a nudge,
+// never a nag. Each gate has its own counter so the pair on session one fires.
+const DIFF_ASK_EVERY = 3;
+// adj shifts the warm-up tier mix AND the sentence ladder (-2 … +2, cumulative
+// and clamped). Medium and "kind of hard" are both the target zone, so neither
+// moves the dial; only a genuinely too-easy or too-hard read does.
 const DIFF_LEVELS = [
-  { id: "easy", label: "Easy" },
-  { id: "medium", label: "Medium" },
-  { id: "hard", label: "Hard" },
-  { id: "toohard", label: "Too hard" },
+  { id: "veasy", label: "Very easy", adj: 2 },
+  { id: "easy", label: "Easy", adj: 1 },
+  { id: "medium", label: "Medium", adj: 0 },
+  { id: "hard", label: "Kind of hard", adj: 0 },
+  { id: "vhard", label: "Really hard", adj: -2 },
 ];
 const DIFF_ACK = {
+  veasy: "Then let's stretch you — harder words and busier sentences from here.",
   easy: "Good to know — we'll mix in harder words from here.",
   medium: "Right in the zone. That's where progress lives.",
-  hard: "Hard is where the gains are. Mark the toughest words at the end and they'll come back until you beat them.",
-  toohard: "Thanks for the honesty. We'll ease the mix — and a shorter session is always a fine move.",
+  hard: "Kind of hard is the sweet spot — that's where the gains are.",
+  vhard: "Thanks for the honesty. We'll ease the mix — and a shorter session is always a fine move.",
 };
 
 const isIOS = typeof navigator !== "undefined" && /iP(hone|ad|od)/.test(navigator.userAgent);
@@ -30,8 +41,23 @@ const isStandalone =
 const isAndroid = typeof navigator !== "undefined" && /Android/.test(navigator.userAgent);
 
 // adaptive word selection tuning
+// HARD_MARKS gates the whole "tap the words that were hard" feature — the
+// summary chip grid, the 3× repeat boost, and the hard-mark-derived rescore
+// suggestions. PAUSED 2026-08-09 (CB): too many hard words were surfacing at
+// the end of a session. The code stays wired so it can be switched back on;
+// see "Paused features" in tongue-and-groove.md before flipping it.
+const HARD_MARKS = false;
 const HARD_BOOST = 3;    // hard-marked words appear 3× as often as normal words
 const RECENT_GAP = 200;  // an item can't repeat until this many others have shown (~8 sets of 25)
+// Weight for one word in a pick: hard-marked words pull HARD_BOOST× while the
+// feature is on, and every word weighs the same while it's paused.
+const hardWeight = (st) => (HARD_MARKS && st?.h > 0 ? HARD_BOOST : 1);
+
+// §7 pacing: sentences run 50% faster than the word pace (CB 2026-08-09) —
+// 30 WPM on the warm-up words means 45 WPM inside sentences. Connected speech
+// is genuinely quicker than isolated word drilling, but this is a background
+// adaptation: the user still sees and sets one number on one slider.
+const SENT_PACE = 1.5;
 
 // Staged practice session: warm-up words → 3×10 word→sentence couples that
 // escalate 1 → 2 → 3+ instances of the target sound (§6 ladder) → optional
@@ -50,12 +76,28 @@ const buildPlan = (variantId) => {
 // category-loaded drill sentences — mixed, never chosen by the user. A
 // scenario session filters to its own bank instead.
 const ALL_COUPLE_SENTS = [...Object.values(SCENARIO_SENTENCES).flat(), ...Object.values(SENTENCES).flat()];
-// Doctor + Restaurant get extra weight in the Practice couples mix (CB 2026-08-06)
-const DR_REST = new Set([...(SCENARIO_SENTENCES.dr || []), ...(SCENARIO_SENTENCES.rest || [])]);
+// Doctor + Restaurant get extra weight in the Practice couples mix (CB
+// 2026-08-06) — but that weight belongs to the PACK, not to each sentence.
+// Applied per sentence it compounded with bank depth: dr + rest hold 152 of
+// the 415 couple sentences, so a 3× per-sentence weight put 74% of a rung-1
+// set on those two and Phone / Family / Work / Shopping drew ~5% each — a
+// 10-sentence set usually contained none of them at all. Every pack now gets a
+// guaranteed slot per set and emphasis only decides the leftovers.
+const SCEN_EMPHASIS = { dr: 3, rest: 3 };
+const DRILL = "drill"; // the category-loaded sentences behave as one more pack
+const PACK_BANK = { ...SCENARIO_SENTENCES, [DRILL]: Object.values(SENTENCES).flat() };
+const PACK_IDS = [...SCENARIOS.map((s) => s.id), DRILL];
 
 // §6 ladder rung of a sentence: 1 / 2 / 3 = instances of its target sound
 // (from the build-time tags); 0 = no target sound, unusable as a couple.
 const rungOf = (s) => { const m = SENT_META[s]; return !m || !m.cat || m.n === 0 ? 0 : Math.min(m.n, 3); };
+// Couples set 1/2/3 normally targets rung 1/2/3. The difficulty check-in
+// shifts that whole ladder a rung up or down, so an "easy" answer at the first
+// warm-up break makes the sentence sets that follow busier (CB 2026-08-09).
+// The array is the fallback order for a rung whose bank comes up empty.
+const RUNG_ORDER = { 1: [1, 2, 3], 2: [2, 1, 3], 3: [3, 2, 1] };
+const rungOrder = (pos, adj) =>
+  RUNG_ORDER[Math.max(1, Math.min(3, pos + (adj >= 1 ? 1 : adj <= -1 ? -1 : 0)))];
 
 // §2: a scenario is session-ready when every ladder rung can fill a 10-couple
 // set. Thinner scenarios stay listed with an "In progress" badge.
@@ -154,9 +196,18 @@ export default function App() {
   const [feedbackOn, setFeedbackOn] = useState(saved?.feedbackOn ?? true);
   const [iosHintDismissed, setIosHintDismissed] = useState(saved?.iosHintDismissed ?? false);
   const [wordStats, setWordStats] = useState(saved?.wordStats ?? {}); // { word: { s: seen count, h: hard level } }
-  const [diffChecks, setDiffChecks] = useState(saved?.diffChecks ?? []); // difficulty check-ins: [{ d, v, sets }]
-  const [lastDiffAsk, setLastDiffAsk] = useState(saved?.lastDiffAsk ?? 0); // totalSetsAll when last asked
-  const [diffAnswered, setDiffAnswered] = useState(null); // this session's answer (not persisted)
+  const [diffChecks, setDiffChecks] = useState(saved?.diffChecks ?? []); // difficulty check-ins: [{ d, v, sess }]
+  const [sessDone, setSessDone] = useState(saved?.sessDone ?? 0); // finished sessions (and pairs sets), all time
+  const [warmAskDay, setWarmAskDay] = useState(saved?.warmAskDay ?? ""); // day key of the last warm-up-break check-in
+  const [sumAskDay, setSumAskDay] = useState(saved?.sumAskDay ?? ""); // day key of the last end-of-session check-in
+  const [sumAskSess, setSumAskSess] = useState(saved?.sumAskSess ?? 0); // sessDone at the last end-of-session check-in
+  // This session's check-in state, not persisted. warmAsk/sumAsk latch on when
+  // an ask point opens so the card stays put after it closes its own gate;
+  // warmAnswer/sumAnswer hold the answer that ask point got.
+  const [warmAsk, setWarmAsk] = useState(false);
+  const [sumAsk, setSumAsk] = useState(false);
+  const [warmAnswer, setWarmAnswer] = useState(null);
+  const [sumAnswer, setSumAnswer] = useState(null);
   const [diffAdj, setDiffAdj] = useState(saved?.diffAdj ?? 0); // warm-up tier-mix shift, -2 … +2
   const statsRef = useRef(wordStats);
   useEffect(() => { statsRef.current = wordStats; }, [wordStats]);
@@ -226,6 +277,10 @@ export default function App() {
   const todayWords = todayEntry.w;
   const todayPairs = todayEntry.p;
   const todaySets = todayEntry.s;
+  // Check-in gates. The warm-up one fires once a day; the end-of-session one
+  // fires on the day's first finished session and then every DIFF_ASK_EVERY.
+  const warmAskDue = feedbackOn && warmAskDay !== todayKey;
+  const sumAskDue = feedbackOn && (sumAskDay !== todayKey || sessDone - sumAskSess >= DIFF_ASK_EVERY);
 
   const T = dark
     ? { bg:"#141824", card:"#1E2534", ink:"#B9CDF5", mut:"#9BA4B4", line:"#2D3648", blue:"#7FA4E8", onBlue:"#101A30", btn:"#3563C7", onBtn:"#FFFFFF", rust:"#D07A55", amber:"#E9B44C", chip:"#28324A", tex:"none" }
@@ -234,8 +289,8 @@ export default function App() {
 
   // persist everything that should survive a close (A8 / M-persist)
   useEffect(() => {
-    saveState({ ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, lastDiffAsk, diffAdj, recent: recentRef.current });
-  }, [ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, lastDiffAsk, diffAdj]);
+    saveState({ ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj, recent: recentRef.current });
+  }, [ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj]);
 
   // §8 bugfix: whenever "Use recommended" is on, the ratings ARE the current
   // condition's preset — enforced here (not just at screen transitions) so the
@@ -277,7 +332,7 @@ export default function App() {
         const cat = pickCat(ratings, avail);
         const cand = notRecent(WORDS_BY_TIER_CAT[t][cat].filter((w) => !used.has(w)));
         let tw = 0;
-        const ws = cand.map((w) => { const wt = stats[w]?.h > 0 ? HARD_BOOST : 1; tw += wt; return wt; });
+        const ws = cand.map((w) => { const wt = hardWeight(stats[w]); tw += wt; return wt; });
         let r = Math.random() * tw;
         for (let i = 0; i < cand.length; i++) { r -= ws[i]; if (r <= 0) return cand[i]; }
         return cand[cand.length - 1];
@@ -293,6 +348,47 @@ export default function App() {
     return queue;
   };
 
+  // One couples set, built up front so the pack spread is guaranteed rather
+  // than left to n independent draws. Practice mode: every scenario pack takes
+  // a slot first, then the leftovers go to an emphasis-weighted draw (Doctor
+  // and Restaurant 3×). A scenario session draws all n from its own pack.
+  // Each slot then resolves to a sentence at the target rung, falling back
+  // through `order` and finally to any unused sentence in that pack.
+  const buildCouplesQueue = (n, order, scenOnly) => {
+    const slots = [];
+    if (scenOnly) for (let i = 0; i < n; i++) slots.push(scenOnly);
+    else {
+      SCENARIOS.forEach((sc) => { if (slots.length < n) slots.push(sc.id); }); // coverage first
+      while (slots.length < n) { // then emphasis decides what's left over
+        // Coverage already gave every pack one slot, so the leftovers are bid
+        // for with emphasis MINUS that slot — which lands Doctor and
+        // Restaurant at ~2.6 of a 10-set against exactly 1 for every other
+        // pack, i.e. the intended 3× priority with nothing squeezed out.
+        let tw = 0;
+        const ws = PACK_IDS.map((p) => { const w = p === DRILL ? 1 : (SCEN_EMPHASIS[p] ?? 1) - 1; tw += w; return w; });
+        let r = Math.random() * tw;
+        let pick = PACK_IDS[PACK_IDS.length - 1];
+        for (let i = 0; i < PACK_IDS.length; i++) { r -= ws[i]; if (r <= 0) { pick = PACK_IDS[i]; break; } }
+        slots.push(pick);
+      }
+      for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]]; }
+    }
+    const used = new Set();
+    const queue = [];
+    slots.forEach((p) => {
+      const bank = PACK_BANK[p] || [];
+      let cand = [];
+      for (const r of order) { cand = bank.filter((x) => rungOf(x) === r && !used.has(x)); if (cand.length) break; }
+      if (!cand.length) cand = bank.filter((x) => rungOf(x) > 0 && !used.has(x));
+      if (!cand.length) return;
+      const list = notRecent(cand);
+      const sent = list[Math.floor(Math.random() * list.length)];
+      used.add(sent);
+      queue.push(sent);
+    });
+    return queue;
+  };
+
   const updSess = (patch) => {
     const s = { ...sessRef.current, ...patch };
     sessRef.current = s;
@@ -304,7 +400,7 @@ export default function App() {
     const stats = statsRef.current;
     const p = notRecent(pool);
     let total = 0;
-    const ws = p.map((w) => { const wt = stats[w]?.h > 0 ? HARD_BOOST : 1; total += wt; return wt; });
+    const ws = p.map((w) => { const wt = hardWeight(stats[w]); total += wt; return wt; });
     let r = Math.random() * total;
     for (let i = 0; i < p.length; i++) { r -= ws[i]; if (r <= 0) return p[i]; }
     return p[p.length - 1];
@@ -399,21 +495,24 @@ export default function App() {
       updSess({ count: s.count + 1, credits: s.credits + 1 });
     } else if (entry.stage === "couples") {
       // §6 ladder: couples set 1 uses 1-instance sentences, set 2 exactly 2,
-      // set 3 uses 3+. Thin banks fall back to the nearest rung (audit-flagged).
+      // set 3 uses 3+. The whole set is queued up front (see
+      // buildCouplesQueue) so every scenario pack is represented; rebuilt when
+      // the set changes and when a Redo runs the same set again.
       const pos = s.plan.slice(0, s.idx).filter((p) => p.stage === "couples").length + 1;
-      const bank = (mode === "scen" && SCENARIO_SENTENCES[scenario]) || ALL_COUPLE_SENTS;
-      const order = pos === 1 ? [1, 2, 3] : pos === 2 ? [2, 1, 3] : [3, 2, 1];
-      let cand = [];
-      for (const r of order) { cand = bank.filter((x) => rungOf(x) === r); if (cand.length) break; }
-      if (!cand.length) cand = bank;
-      const list = notRecent(cand);
-      // Doctor and Restaurant sentences carry 3× weight in the Practice mix
-      // (CB 2026-08-06) — they're the event-prep priorities.
-      let tw = 0;
-      const ws = list.map((x) => { const wt = DR_REST.has(x) ? 3 : 1; tw += wt; return wt; });
-      let r = Math.random() * tw;
-      let sent = list[list.length - 1];
-      for (let i = 0; i < list.length; i++) { r -= ws[i]; if (r <= 0) { sent = list[i]; break; } }
+      const order = rungOrder(pos, diffAdj);
+      if (s.cqFor !== s.idx || s.cqi >= (s.cq?.length ?? 0)) {
+        s = updSess({ cq: buildCouplesQueue(entry.n, order, mode === "scen" ? scenario : null), cqi: 0, cqFor: s.idx });
+      }
+      let sent = s.cq[s.cqi];
+      if (!sent) { // queue exhausted (thin pack) — fall back to a single draw
+        const bank = (mode === "scen" && SCENARIO_SENTENCES[scenario]) || ALL_COUPLE_SENTS;
+        let cand = [];
+        for (const r of order) { cand = bank.filter((x) => rungOf(x) === r); if (cand.length) break; }
+        if (!cand.length) cand = bank;
+        const list = notRecent(cand);
+        sent = list[Math.floor(Math.random() * list.length)];
+      }
+      s = updSess({ cqi: s.cqi + 1 });
       const w = SENT_META[sent]?.w || topTarget(sent);
       nx = { kind: "couple", sentence: sent, targets: targetsOf(sent), w, beat: 1, hint: !s.hinted };
       recordSeen(w);
@@ -464,15 +563,15 @@ export default function App() {
       let alive = true;
       const step = () => {
         if (!alive) return;
-        // §7: one shared WPM; a sentence holds as a static block for its word
-        // count ÷ 1.7 (CB 2026-08-06: no read-along walking the words, and
-        // connected speech reads ~70% faster than isolated word drilling).
+        // §7: one shared WPM on one slider; a sentence holds as a static block
+        // for its word count ÷ SENT_PACE, so it plays 50% faster per word than
+        // the warm-up words without the user setting a second number.
         next();
         if (tickOn) playTick();
         const cur = itemRef.current;
         const base = (60 / wpm) * 1000;
         const isSent = cur && (cur.kind === "bonus" || (cur.kind === "couple" && cur.beat === 2));
-        timerRef.current = setTimeout(step, isSent ? (cur.sentence.split(/\s+/).length * base) / 1.7 : base);
+        timerRef.current = setTimeout(step, isSent ? (cur.sentence.split(/\s+/).length * base) / SENT_PACE : base);
       };
       step();
       return () => { alive = false; clearTimeout(timerRef.current); };
@@ -506,6 +605,7 @@ export default function App() {
       setAward(ms ? { milestone: ms } : { session: true });
       setDifficult({});
       marksAppliedRef.current = false;
+      setSessDone((n) => n + 1); // drives the end-of-session check-in cadence
       setScreen("summary");
     }
   }, [sess, totalDone]);
@@ -525,9 +625,27 @@ export default function App() {
       });
       setDifficult({});
       marksAppliedRef.current = false;
+      setSessDone((n) => n + 1);
       setScreen("summary");
     }
   }, [setItems]);
+
+  // Opening an ask point closes its gate, answered or not — an ignored
+  // check-in doesn't come back next session (CB 2026-08-09: never pester).
+  useEffect(() => {
+    const s = sess;
+    if (screen === "drill" && s?.brk && s.idx === 0 && s.plan[0].stage === "warmup" && !warmAsk && warmAskDue) {
+      setWarmAsk(true);
+      setWarmAskDay(todayKey);
+    }
+  }, [screen, sess]);
+  useEffect(() => {
+    if (screen === "summary" && !sumAsk && sumAskDue) {
+      setSumAsk(true);
+      setSumAskDay(todayKey);
+      setSumAskSess(sessDone);
+    }
+  }, [screen]);
 
   useEffect(() => { // keep charts scrolled to the latest bar
     if (chartScrollRef.current) chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
@@ -537,6 +655,7 @@ export default function App() {
   // hard boost and restart their clean streak; unmarked appearances cool a
   // previous hard flag down one level.
   const applyHardMarks = () => {
+    if (!HARD_MARKS) return; // paused — nothing marks words hard right now
     if (marksAppliedRef.current || !setItems.length) return;
     marksAppliedRef.current = true;
     const marks = difficult;
@@ -563,17 +682,21 @@ export default function App() {
     setSetItems([]);
     setItem(null);
     setAward(null);
-    setDiffAnswered(null);
+    setWarmAsk(false);
+    setSumAsk(false);
+    setWarmAnswer(null);
+    setSumAnswer(null);
     setScreen("drill");
   };
   const switchMode = (m) => { setPlaying(false); setMode(m); setItem(null); itemRef.current = null; doneRef.current = 0; setSetItems([]); sessRef.current = null; setSess(null); }; // each set is one mode — hard-word review never mixes words with pairs
-  const answerDiff = (v) => {
-    setDiffChecks((c) => [...c, { d: dkey(new Date()), v, sets: totalSetsAll }]);
-    setLastDiffAsk(totalSetsAll);
-    setDiffAnswered(v);
-    // the answer moves the dial: Easy → harder warm-up mix, Too hard → easier
-    if (v === "easy") setDiffAdj((a) => Math.min(2, a + 1));
-    if (v === "toohard") setDiffAdj((a) => Math.max(-2, a - 1));
+  // One check-in answer, from either ask point (the gates already closed when
+  // the ask opened). It logs the answer and moves the difficulty dial, which
+  // steers both the warm-up tier mix and the sentence ladder from here on.
+  const answerDiff = (v, where) => {
+    const lvl = DIFF_LEVELS.find((l) => l.id === v);
+    setDiffChecks((c) => [...c, { d: todayKey, v, sess: sessDone }]);
+    (where === "warmup" ? setWarmAnswer : setSumAnswer)(v);
+    if (lvl?.adj) setDiffAdj((a) => Math.max(-2, Math.min(2, a + lvl.adj)));
   };
   const togglePaced = () => { setPlaying(false); setPaced((p) => !p); };
 
@@ -754,7 +877,7 @@ export default function App() {
         <div className="card">
           <h2>Why it works</h2>
           <p className="sub"><b>The right words.</b> Built from the 1,500 most-used words in real conversation, filtered to the patterns that challenge the mouth most — blends, clusters, and TH sounds. You practice what you'll actually say.</p>
-          <p className="sub"><b>Tuned to you.</b> You score six sound types from 1–5. Practice leans toward your hardest, and any word you mark as hard comes back three times as often until you beat it.</p>
+          <p className="sub"><b>Tuned to you.</b> You score six sound types from 1–5, and practice leans toward your hardest. A one-tap check-in — how was that? — nudges the words and sentences easier or harder as you go.</p>
           <p className="sub"><b>Real life built in.</b> Ready-made word sets for the restaurant, the doctor's office, phone calls, and more.</p>
           <p className="sub"><b>Momentum you can see.</b> Daily rings, streaks, and milestone awards make every session count.</p>
           <p className="sub" style={{ marginBottom: 0 }}><i>A practice tool, not medical treatment — keep working with your care team.</i></p>
@@ -863,7 +986,6 @@ export default function App() {
   }
 
   if (screen === "summary") {
-    const hardCount = Object.values(difficult).filter(Boolean).length;
     return (
       <div className="app">
         <style>{css}</style>
@@ -885,35 +1007,25 @@ export default function App() {
           <div className="bigNum" style={{ marginTop: award ? 12 : 0 }}>{setItems.length}</div>
           <div className="bigLbl">{mode === "pairs" ? "pairs this set" : "items this session"} · {totalDone.toLocaleString()} total words</div>
         </div>
-        {feedbackOn && (
+        {/* End-of-session check-in — the one piece of feedback the app asks
+            for now. Shown on a finished session, gated by sumAskDue. */}
+        {sumAsk && (
           <div className="card">
-            <h2>{mode === "pairs" ? "Which word pairs were hard?" : "Any hard ones?"}</h2>
-            <p className="sub">{mode === "pairs" ? "Tap the pairs that felt hard to say." : "Tap the words that felt hard to say."}{hardCount > 0 ? ` ${hardCount} marked.` : ""}</p>
-            <div className="wordGrid">
-              {setItems.map((w, i) => (
-                <button key={i} className={"wchip" + (difficult[i] ? " hard" : "")}
-                  onClick={() => setDifficult((d) => ({ ...d, [i]: !d[i] }))}>{w}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        {mode === "pairs" && (diffAnswered || diffChecks.length === 0 || totalSetsAll - lastDiffAsk >= DIFF_ASK_GAP) && (
-          <div className="card">
-            <h2>How hard was that?</h2>
-            {diffAnswered ? (
+            <h2>How was that?</h2>
+            {sumAnswer ? (
               <>
-                <p className="sub" style={{ marginBottom: 0 }}>{DIFF_ACK[diffAnswered]}</p>
-                {diffAnswered === "toohard" && paced && (
+                <p className="sub" style={{ marginBottom: 0 }}>{DIFF_ACK[sumAnswer]}</p>
+                {sumAnswer === "vhard" && paced && (
                   <button className="condBtn" style={{ marginTop: 10 }}
                     onClick={() => setWpm((w) => Math.max(10, w - 5))}>Slow the pace to {Math.max(10, wpm - 5)} WPM</button>
                 )}
               </>
             ) : (
               <>
-                <p className="sub">A quick check-in — your honest read helps you tune the practice.</p>
+                <p className="sub">A quick check-in — your honest read tunes the words and sentences you get next time.</p>
                 {DIFF_LEVELS.map((l) => (
                   <button key={l.id} className="condBtn" style={{ margin: "3px 0" }}
-                    onClick={() => answerDiff(l.id)}>{l.label}</button>
+                    onClick={() => answerDiff(l.id, "summary")}>{l.label}</button>
                 ))}
               </>
             )}
@@ -922,8 +1034,18 @@ export default function App() {
         {rescoreDue && (
           <div className="card" style={{ textAlign: "center" }}>
             <h2 style={{ marginBottom: 6 }}>{totalSetsAll} sets in — time to re-check your scores</h2>
-            <p className="sub">See your hardest sound types ranked, with new suggested ratings based on the words you marked hard.</p>
-            <button className="cta" style={{ width: "100%", margin: 0 }} onClick={() => { applyHardMarks(); goRescore(); }}>See my hardest sounds</button>
+            {HARD_MARKS ? (
+              <>
+                <p className="sub">See your hardest sound types ranked, with new suggested ratings based on the words you marked hard.</p>
+                <button className="cta" style={{ width: "100%", margin: 0 }} onClick={() => { applyHardMarks(); goRescore(); }}>See my hardest sounds</button>
+              </>
+            ) : (
+              <>
+                <p className="sub">Sounds shift as you practice. Take a look at your 1–5 ratings and move any that no longer feel right.</p>
+                <button className="cta" style={{ width: "100%", margin: 0 }}
+                  onClick={() => { setLastRescoreSets(totalSetsAll); setPlaying(false); setScreen("assess"); }}>Check my sound ratings</button>
+              </>
+            )}
           </div>
         )}
         <button className="cta" onClick={startNewSet}>{mode === "pairs" ? "Next set" : "New session"}</button>
@@ -962,7 +1084,7 @@ export default function App() {
             </button>
           </div>
           <div className="setting">
-            <span className="setLbl">Ask about hard words</span>
+            <span className="setLbl">Ask how practice felt</span>
             <button className="switch" onClick={() => setFeedbackOn((f) => !f)} aria-pressed={feedbackOn}>
               <span className={"track" + (feedbackOn ? " on" : "")}><span className="knob" /></span>
             </button>
@@ -971,7 +1093,7 @@ export default function App() {
             <span className="setLbl">Sound ratings — what's hard right now</span>
             <button className="hdrBtn" onClick={() => { setPlaying(false); setScreen("assess"); }}>Edit</button>
           </div>
-          {totalWords > 0 && (
+          {HARD_MARKS && totalWords > 0 && (
             <div className="setting">
               <span className="setLbl">Suggested ratings from your hard words</span>
               <button className="hdrBtn" onClick={goRescore}>See</button>
@@ -1219,16 +1341,16 @@ export default function App() {
           <div style={{ textAlign: "center", width: "100%", maxWidth: 420 }}>
             <div className="awardWrap"><Badge size={72} color={T.blue} ring={T.amber} star="#fff" /></div>
             <h2 style={{ margin: "12px 0 4px" }}>{stageInfo(sess).name} done!</h2>
-            {/* Difficulty check-in lives on the first warm-up break (CB
-                2026-08-05: ask right after the first words), gated to the
-                first-ever session then every DIFF_ASK_GAP sets. */}
-            {sess.idx === 0 && sess.plan[0].stage === "warmup" && (diffAnswered || diffChecks.length === 0 || totalSetsAll - lastDiffAsk >= DIFF_ASK_GAP) ? (
+            {/* Difficulty check-in on the first warm-up break (CB 2026-08-05:
+                ask right after the first words), once a day — it lands before
+                the three sentence sets so the answer can shift their rung. */}
+            {sess.idx === 0 && sess.plan[0].stage === "warmup" && warmAsk ? (
               <div style={{ margin: "0 0 14px" }}>
-                <p className="idle" style={{ margin: "0 auto 10px" }}>How hard was that?</p>
-                {diffAnswered ? (
+                <p className="idle" style={{ margin: "0 auto 10px" }}>How was that?</p>
+                {warmAnswer ? (
                   <>
-                    <p className="idle" style={{ margin: "0 auto 10px" }}>{DIFF_ACK[diffAnswered]}</p>
-                    {diffAnswered === "toohard" && paced && (
+                    <p className="idle" style={{ margin: "0 auto 10px" }}>{DIFF_ACK[warmAnswer]}</p>
+                    {warmAnswer === "vhard" && paced && (
                       <button className="condBtn" style={{ margin: "0 0 4px" }}
                         onClick={() => setWpm((w) => Math.max(10, w - 5))}>Slow the pace to {Math.max(10, wpm - 5)} WPM</button>
                     )}
@@ -1236,7 +1358,7 @@ export default function App() {
                 ) : (
                   DIFF_LEVELS.map((l) => (
                     <button key={l.id} className="condBtn" style={{ margin: "3px 0", textAlign: "center" }}
-                      onClick={() => answerDiff(l.id)}>{l.label}</button>
+                      onClick={() => answerDiff(l.id, "warmup")}>{l.label}</button>
                   ))
                 )}
               </div>
