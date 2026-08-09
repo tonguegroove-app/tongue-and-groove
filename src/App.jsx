@@ -53,11 +53,13 @@ const RECENT_GAP = 200;  // an item can't repeat until this many others have sho
 // feature is on, and every word weighs the same while it's paused.
 const hardWeight = (st) => (HARD_MARKS && st?.h > 0 ? HARD_BOOST : 1);
 
-// §7 pacing: sentences run 50% faster than the word pace (CB 2026-08-09) —
-// 30 WPM on the warm-up words means 45 WPM inside sentences. Connected speech
-// is genuinely quicker than isolated word drilling, but this is a background
-// adaptation: the user still sees and sets one number on one slider.
-const SENT_PACE = 1.5;
+// §7 pacing: sentences run 80% faster than the word pace — 30 WPM on the
+// warm-up words means 54 WPM inside sentences. Connected speech is genuinely
+// quicker than isolated word drilling, but this is a background adaptation:
+// the user still sees and sets one number on one slider.
+// 1.7 (2026-08-06) → 1.5 (CB, earlier 2026-08-09) → 1.8 (CB, still too slow at
+// 1.5, asked for another 20% on top: 1.5 × 1.2).
+const SENT_PACE = 1.8;
 
 // Staged practice session: warm-up words → 3×10 word→sentence couples that
 // escalate 1 → 2 → 3+ instances of the target sound (§6 ladder) → optional

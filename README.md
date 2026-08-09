@@ -22,7 +22,7 @@ Word lists are ordered by conversational frequency (wordfreq top 1,500, filtered
 - **Warm-up words** are spread across difficulty tiers (`TIER_MIX`) and weighted within each tier by your 1–5 sound-category ratings
 - **A five-level check-in** ("How was that?") is asked at the first warm-up break of the day and at the end of a session — the day's first, then every third session. The answer shifts a persisted difficulty dial (`diffAdj`, −2…+2) that steers both the warm-up tier mix and the sentence ladder
 - **Sentence sets** guarantee every scenario pack a slot per set, with Doctor and Restaurant weighted higher (`SCEN_EMPHASIS`)
-- **Sentences play 50% faster** per word than the warm-up words (`SENT_PACE`) off the same single pace slider
+- **Sentences play 80% faster** per word than the warm-up words (`SENT_PACE`) off the same single pace slider
 
 Hard-word marking (tap the words that were hard → they return 3× as often) is **built but paused** — see "Paused features" in `tongue-and-groove.md`. Flip `HARD_MARKS` in `src/App.jsx` to bring it back.
 
