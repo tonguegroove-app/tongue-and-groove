@@ -1007,7 +1007,7 @@ export default function App() {
             </div>
           )}
           <div className="bigNum" style={{ marginTop: award ? 12 : 0 }}>{setItems.length}</div>
-          <div className="bigLbl">{mode === "pairs" ? "pairs this set" : "items this session"} · {totalDone.toLocaleString()} total words</div>
+          <div className="bigLbl">{mode === "pairs" ? "pairs this set" : "items this session"} · {totalDone.toLocaleString()} total target words</div>
         </div>
         {/* End-of-session check-in — the one piece of feedback the app asks
             for now. Shown on a finished session, gated by sumAskDue. */}
@@ -1219,13 +1219,13 @@ export default function App() {
                 <Ring r={28} sw={13} frac={todaySets / GOALS.sets} color={T.rust} />
               </svg>
               <div className="bigLeg">
-                <div><div className="bigLegName">Words</div><div className="bigLegVal" style={{ color: T.blue }}>{todayWords.toLocaleString()}</div></div>
+                <div><div className="bigLegName">Target words</div><div className="bigLegVal" style={{ color: T.blue }}>{todayWords.toLocaleString()}</div></div>
                 <div><div className="bigLegName">Sound pairs</div><div className="bigLegVal" style={{ color: dark ? T.amber : "#8A6414" }}>{todayPairs.toLocaleString()}</div></div>
                 <div><div className="bigLegName">Sets</div><div className="bigLegVal" style={{ color: T.rust }}>{todaySets.toLocaleString()}</div></div>
               </div>
             </div>
             {todayWords > GOALS.words ? (
-              <p className="sub" style={{ margin: "10px 0 0", fontSize: "14px", fontWeight: 700, color: dark ? T.amber : "#8A6414" }}>Daily goal beaten — the gold lap shows words past {GOALS.words.toLocaleString()}.</p>
+              <p className="sub" style={{ margin: "10px 0 0", fontSize: "14px", fontWeight: 700, color: dark ? T.amber : "#8A6414" }}>Daily goal beaten — the gold lap shows target words past {GOALS.words.toLocaleString()}.</p>
             ) : (
               <p className="sub" style={{ margin: "10px 0 0", fontSize: "13px" }}>Sound pairs count as 2 words.</p>
             )}
@@ -1244,7 +1244,7 @@ export default function App() {
                 const best = Object.values(hist).reduce((b, d) => ({
                   w: Math.max(b.w, d.w || 0), p: Math.max(b.p, d.p || 0), s: Math.max(b.s, d.s || 0),
                 }), { w: 0, p: 0, s: 0 });
-                return [["Words", best.w, T.blue], ["Pairs", best.p, dark ? T.amber : "#8A6414"], ["Sets", best.s, T.rust]].map(([lbl, v, col]) => (
+                return [["Target words", best.w, T.blue], ["Pairs", best.p, dark ? T.amber : "#8A6414"], ["Sets", best.s, T.rust]].map(([lbl, v, col]) => (
                   <div key={lbl}><div className="legLbl">{lbl}</div><div className="legVal" style={{ color: col }}>{v.toLocaleString()}</div></div>
                 ));
               })()}

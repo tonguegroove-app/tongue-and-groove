@@ -578,6 +578,12 @@ export const VARIANTS = [
 export const COND_VARIANT = { stroke: "dysarthria", dementia: "apraxia", tbi: "dysarthria", parkinsons: "dysarthria", other: "dysarthria" };
 
 export const MILESTONES = [500, 1000, 2000, 5000, 10000, 15000];
-// Daily ring capacity (CB 2026-08-04): high ceilings so a heavy practice day
-// still shows progress inside the ring instead of lapping it early.
-export const GOALS = { words: 1200, pairs: 150, sets: 50 };
+// Daily ring capacity. Recalibrated 2026-08-10 (CB) so the rings close on a
+// real day's practice instead of a heroic one. The words ring counts TARGET
+// words — the warm-up words plus each sentence's target-sound words, not every
+// word spoken aloud — which is why the label says "Target words". One full
+// session banks 190 target words and 5 sets (dysarthria warm-up shape), so
+// 750 / 20 both land at 3.9 sessions; 125 pairs is five 25-pair sets. The
+// apraxia and articulation shapes split the warm-up into more sets, so they
+// hit 750 words at 28 and 24 sets — the sets ring closes early for them.
+export const GOALS = { words: 750, pairs: 125, sets: 20 };
