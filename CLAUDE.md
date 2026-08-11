@@ -18,5 +18,6 @@ If CB confirms it IS options work: do it entirely inside `~/Projects/options-sit
 
 - **Working copy:** `~/Projects/Tongue-Groove` · deploys automatically on every push to `main` (GitHub Actions → Pages, ~1 min): https://tonguegroove-app.github.io/tongue-and-groove/
 - **Session notes live in the vault:** `obsidian-vault/CB_Brain/Business Projects/Tongue and Groove/00-Session Notes.md` (dated `## YYYY-MM-DD — Title` sections, appended chronologically).
+- **The working PRD (`tongue-and-groove.md` in the repo root) is a symlink into the vault** — the real file is `.../Tongue and Groove/01-PRD-Requirements/Tongue and Groove Build PRD.md`. Edit it by either path; it's gitignored here because this repo is **public**, and backed up by the vault's (private) git. Keep planning/business docs out of this repo the same way.
 - **Word library is generated** — never hand-edit `src/words.gen.js` / `src/sentences.gen.js`. Pipeline: `python3 scripts/build_words.py` → `node scripts/tag_sentences.mjs` → `node scripts/build_library.mjs` (regenerates vault + repo Word Library docs).
 - **Word pool is cut at the top 1,500 most-used words** (`TOP_N` in `scripts/build_words.py`). Confirmed 2026-08-05: a 1,000 cut opens content gaps (TH 20→10, S-blends 23→13) — don't lower it without rechecking `vocab-audit.md`.
