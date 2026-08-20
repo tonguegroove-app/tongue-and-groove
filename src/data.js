@@ -191,6 +191,22 @@ export const SCENARIO_SENTENCES = {
     "I take the stairs to stay steady.",
     "The test results felt like good news at last.",
     "My birthday is the thirtieth of this month.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "Can the specialist still schedule my swallowing study?",
+    "I think the therapy is helping my breathing.",
+    "Could you send the last test results to my doctor?",
+    "Could you please explain that clearly and slowly?",
+    "Could you explain the instructions for my strength stretches?",
+    "I'd like to speak with the specialist about my speech.",
+    "I'd like to thank the therapist for everything this month.",
+    "I still get dizzy when I stand up from the stool.",
+    "Could you please explain the plan for my speech clearly?",
+    "I think my breathing and my throat feel better this month.",
   ],
   rest: [
     "I have a reservation for six o'clock.",
@@ -274,6 +290,24 @@ export const SCENARIO_SENTENCES = {
     "Please bring blueberry pancakes with black coffee.",
     "Could we start with the steak special?",
     "Stop by the salad station before the steaks arrive.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "Could I get fresh bread and a green salad?",
+    "Could I try the grilled chicken with fresh broccoli?",
+    "Could I start with a small salad and sweet tea?",
+    "Could I please have a clean plate and a glass of water?",
+    "I'd like the cold milk and the last piece of toast.",
+    "I think we'll both have something else, thank you.",
+    "Could we still get a small table by the stairs?",
+    "Could you please clear the glasses and the plates?",
+    "I'll start with the soup and a small sweet tea.",
+    "Could you bring fresh bread and a green salad, please?",
+    "I'd like the small steak with sweet potatoes, please.",
+    "I think I'll thank the chef for the birthday cake.",
   ],
   phone: [
     "Hello, may I speak with the billing department?",
@@ -324,6 +358,21 @@ export const SCENARIO_SENTENCES = {
     "Please click the blue link and reply.",
     "The plan includes unlimited calls and clear billing.",
     "The strong signal streams without a struggle.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "I'm trying to transfer money from my credit account.",
+    "Could you please speak slowly and spell that clearly?",
+    "I'd like to stop the service and start a smaller plan.",
+    "I can't find the last four digits of my account.",
+    "Could you please explain the plan clearly?",
+    "I need to stop the service — I still want a statement.",
+    "I want to send the last payment and hold the rest.",
+    "Could you please explain the flat monthly plan clearly?",
+    "I still can't speak fast — could you stay on the line?",
   ],
   fam: [
     "The grandchildren are visiting this weekend.",
@@ -375,6 +424,18 @@ export const SCENARIO_SENTENCES = {
     "The kids screamed and sprinted through the sprinkler.",
     "We gathered together every third Thursday.",
     "My cousins went camping last August.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "Could you thank your brother for the birthday gift?",
+    "Could you please pass the clean plates and the glasses?",
+    "I'd like to thank them both for everything this month.",
+    "Can you bring fresh bread and green grapes to dinner?",
+    "I'd like to call my brother and my mother this Thursday.",
+    "I think they're coming this Thursday for my birthday.",
   ],
   shop: [
     "Which aisle has the frozen vegetables?",
@@ -423,6 +484,19 @@ export const SCENARIO_SENTENCES = {
     "The stroller squeaked down the street.",
     "I grabbed strawberries, sprouts, and string cheese.",
     "The flower place sells blooming plants.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "Could I please get a clean plastic bag for the glass?",
+    "I can't find the cold milk — which aisle is it in?",
+    "Could you tell me the price of the fresh green grapes?",
+    "I'd like to stop at the store for a small snack.",
+    "I'd like to send back the last order and hold the rest.",
+    "I'd like a fresh printed receipt for the cheaper brand.",
+    "Could you please explain the discount clearly?",
   ],
   biz: [
     "Can we schedule the meeting for Thursday morning?",
@@ -472,6 +546,23 @@ export const SCENARIO_SENTENCES = {
     "I sent the exact amount to the correct account.",
     "Describe the structure of our spring strategy.",
     "Bring the printed brochures to the front desk.",
+    // High-use dense sentences (CB 2026-08-20). The scenario audit found sound
+    // density running INVERSE to real-world usefulness: only 2% of rung-3
+    // sentences were a request or a question, against 39% at rung 1 -- set 3,
+    // the hardest workout, was almost all third-person narrative. These are
+    // written the other way round: a real thing a patient says, loaded to 3+
+    // instances of one sound. Every one is verified rung 3 with p >= 4.
+    "Could you print the agenda before the progress review?",
+    "Could you please explain the plan clearly to the class?",
+    "I'd like to print the progress report before the presentation.",
+    "Could we still schedule a short staff meeting this week?",
+    "I'd like to thank them both for another smooth month.",
+    "I need the exact amount and the correct account contact.",
+    "I'd like to speak with my supervisor about the staff schedule.",
+    "Could you bring the printed brochures to the front desk?",
+    "I think I'll thank the whole team for another good month.",
+    "Could you please explain the clear plan to the client?",
+    "I'd like the printed proposal before the progress meeting.",
   ],
 };
 

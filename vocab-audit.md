@@ -392,10 +392,20 @@ A couples set needs 10 sentences. Set 1 uses exactly-1-instance sentences, set 2
 
 | Bank | 1 instance (set 1) | 2 instances (set 2) | 3+ (set 3) | no target sound | flags |
 |---|---|---|---|---|---|
-| Practice (all banks) | 180 | 69 | 171 | 43 |  |
-| Doctor visit | 43 | 12 | 11 | 6 |  |
-| Restaurant | 44 | 12 | 10 | 14 |  |
-| Phone calls | 21 | 11 | 11 | 5 |  |
-| Family & social | 21 | 11 | 11 | 6 |  |
-| Shopping | 17 | 11 | 11 | 7 |  |
-| Work & business | 20 | 11 | 11 | 5 |  |
+| Practice (all banks) | 180 | 69 | 226 | 43 |  |
+| Doctor visit | 43 | 12 | 21 | 6 |  |
+| Restaurant | 44 | 12 | 22 | 14 |  |
+| Phone calls | 21 | 11 | 20 | 5 |  |
+| Family & social | 21 | 11 | 17 | 6 |  |
+| Shopping | 17 | 11 | 18 | 7 |  |
+| Work & business | 20 | 11 | 22 | 5 |  |
+
+## Daily-use probability (`p`) against ladder rung — scenario banks
+
+`p` is 1-5, scored by `scripts/utility_score.mjs`. "Says I/my/we" and "is a request or question" are raw structural counts, no judgment involved.
+
+| Rung | Sentences | Mean p | Says I/my/we | Is a request or question |
+|---|---|---|---|---|
+| 1 | 166 | 3.93 | 72% | 39% |
+| 2 | 68 | 3.85 | 66% | 21% |
+| 3 | 120 | 3.84 | 65% | 38% |

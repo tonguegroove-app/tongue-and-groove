@@ -167,6 +167,23 @@ const rungPlan = (n, pos, adj) => {
 // first, so a shortage never silently makes the set easier than asked.
 const RUNG_FALLBACK = { 1: [1, 2, 3], 2: [2, 3, 1], 3: [3, 2, 1] };
 
+// Daily-use weighting (CB 2026-08-20: "analyze for probability a patient would
+// use in daily life, and prioritize high probability"). SENT_META.p is a 1-5
+// score from scripts/utility_score.mjs — is this a thing a patient actually
+// says to another person, or is it text written to hit a sound target? Squaring
+// it makes a 5 twenty-five times likelier than a 1 without ever banning the
+// low scorers outright, so the bank stays varied and the practice stays useful.
+// Deliberately applied INSIDE a rung, never across rungs: usefulness picks
+// which sentence, the ladder still decides how loaded it has to be.
+const useWeight = (s) => { const p = SENT_META[s]?.p ?? 3; return p * p; };
+const weightedPick = (pool) => {
+  let tw = 0;
+  const ws = pool.map((x) => { const w = useWeight(x); tw += w; return w; });
+  let r = Math.random() * tw;
+  for (let i = 0; i < pool.length; i++) { r -= ws[i]; if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+};
+
 // §2: a scenario is session-ready when every ladder rung can fill a 10-couple
 // set. Thinner scenarios stay listed with an "In progress" badge.
 const SCEN_READY = Object.fromEntries(SCENARIOS.map((sc) => {
@@ -507,7 +524,7 @@ export default function App() {
       const minUse = Math.min(...list.map((x) => packUse[SENT_PACK[x]] || 0));
       const spread = list.filter((x) => (packUse[SENT_PACK[x]] || 0) === minUse);
       let tw = 0;
-      const ws = spread.map((x) => { const w = SCEN_EMPHASIS[SENT_PACK[x]] ?? 1; tw += w; return w; });
+      const ws = spread.map((x) => { const w = (SCEN_EMPHASIS[SENT_PACK[x]] ?? 1) * useWeight(x); tw += w; return w; });
       let r = Math.random() * tw;
       let sent = spread[spread.length - 1];
       for (let i = 0; i < spread.length; i++) { r -= ws[i]; if (r <= 0) { sent = spread[i]; break; } }
@@ -552,13 +569,13 @@ export default function App() {
       if (!bank.length) continue;
       const pref = bank.filter(sessWordIn);
       const pool = pref.length ? pref : bank;
-      const sent = pool[Math.floor(Math.random() * pool.length)];
+      const sent = weightedPick(pool); // the round you'd want to take home — lean on real language
       picks.push({ sentence: sent, w: sessWordIn(sent) });
     }
     while (picks.length < BONUS_N) {
       const fill = [...(SCENARIO_SENTENCES.dr || []), ...(SCENARIO_SENTENCES.rest || [])].filter((x) => !taken(x));
       if (!fill.length) break;
-      const sent = fill[Math.floor(Math.random() * fill.length)];
+      const sent = weightedPick(fill);
       picks.push({ sentence: sent, w: sessWordIn(sent) });
     }
     return picks;
@@ -655,8 +672,7 @@ export default function App() {
         let cand = [];
         for (const r of RUNG_FALLBACK[want]) { cand = bank.filter((x) => rungOf(x) === r && !sessSentsRef.current.has(x)); if (cand.length) break; }
         if (!cand.length) cand = bank;
-        const list = notRecent(cand);
-        sent = list[Math.floor(Math.random() * list.length)];
+        sent = weightedPick(notRecent(cand));
       }
       s = updSess({ cqi: s.cqi + 1 });
       const w = SENT_META[sent]?.w || topTarget(sent);
