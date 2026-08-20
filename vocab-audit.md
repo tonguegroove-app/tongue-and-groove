@@ -392,7 +392,7 @@ A couples set needs 10 sentences. Set 1 uses exactly-1-instance sentences, set 2
 
 | Bank | 1 instance (set 1) | 2 instances (set 2) | 3+ (set 3) | no target sound | flags |
 |---|---|---|---|---|---|
-| Practice (all banks) | 180 | 69 | 123 | 43 |  |
+| Practice (all banks) | 180 | 69 | 171 | 43 |  |
 | Doctor visit | 43 | 12 | 11 | 6 |  |
 | Restaurant | 44 | 12 | 10 | 14 |  |
 | Phone calls | 21 | 11 | 11 | 5 |  |

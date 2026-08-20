@@ -16,14 +16,17 @@ const saved = loadState();
 // asked twice on session one and then roughly every third session — a nudge,
 // never a nag. Each gate has its own counter so the pair on session one fires.
 const DIFF_ASK_EVERY = 3;
-// adj shifts the warm-up tier mix AND the sentence ladder (-2 … +2, cumulative
-// and clamped). Medium and "kind of hard" are both the target zone, so neither
-// moves the dial; only a genuinely too-easy or too-hard read does.
+// adj sets the warm-up tier mix, the warm-up syllable bias, AND the sentence
+// rung mix (-2 … +2). CB 2026-08-19: the LATEST answer sets the dial outright —
+// it used to accumulate, so two "Easy" answers on different days pinned it at
+// +2 until two hard reads dragged it back. One check-in, one setting.
+// "Kind of hard" now sits one notch below Medium (it used to share 0 with it)
+// because the two want different sentence sets: see RUNG_MIX.
 const DIFF_LEVELS = [
   { id: "veasy", label: "Very easy", adj: 2 },
   { id: "easy", label: "Easy", adj: 1 },
   { id: "medium", label: "Medium", adj: 0 },
-  { id: "hard", label: "Kind of hard", adj: 0 },
+  { id: "hard", label: "Kind of hard", adj: -1 },
   { id: "vhard", label: "Really hard", adj: -2 },
 ];
 const DIFF_ACK = {
@@ -53,13 +56,48 @@ const RECENT_GAP = 200;  // an item can't repeat until this many others have sho
 // feature is on, and every word weighs the same while it's paused.
 const hardWeight = (st) => (HARD_MARKS && st?.h > 0 ? HARD_BOOST : 1);
 
-// §7 pacing: sentences run 80% faster than the word pace — 30 WPM on the
-// warm-up words means 54 WPM inside sentences. Connected speech is genuinely
-// quicker than isolated word drilling, but this is a background adaptation:
-// the user still sees and sets one number on one slider.
-// 1.7 (2026-08-06) → 1.5 (CB, earlier 2026-08-09) → 1.8 (CB, still too slow at
-// 1.5, asked for another 20% on top: 1.5 × 1.2).
-const SENT_PACE = 1.8;
+// §7 pacing — one slider, syllables underneath (CB 2026-08-19). The warm-up
+// pool averages 2.60 syllables per word (single-syllable words are deleted at
+// build time, so the floor is 2); the words inside sentences average 1.38.
+// Holding a sentence by its WORD count is what made short monosyllabic lines
+// drag: the old SENT_PACE fudge factor (1.7 → 1.5 → 1.8, all by feel) was
+// really that 2.60 / 1.38 = 1.88 density ratio, applied as a single average to
+// sentences that run 0.90–2.67 syllables per word. Per sentence it was off by
+// up to ±60%.
+//   hold = LEAD_IN + syllables / (wpm × WORD_SYL × CONNECTED)
+// Calibrated so the AVERAGE sentence still holds ~8.1 s at 30 WPM — the tempo
+// CB tuned by hand — and only the spread across sentences changes.
+const WORD_SYL = 2.6;      // measured mean syllables of the warm-up word pool
+const CONNECTED = 1.0;     // extra per-syllable speed-up for connected speech;
+                           // the syllable model absorbs what SENT_PACE faked,
+                           // so this is the one honest knob left to turn.
+const LEAD_IN_MS = 350;    // breath + onset, once per sentence, doesn't scale
+// Ceiling on a single sentence (CB 2026-08-19: cap at 12.6 s). Expressed in
+// syllables so it scales with the slider — 16 syllables is 12.65 s at 30 WPM,
+// and a slower setting still gets its slower hold.
+const SENT_CAP_SYL = 16;
+const MIN_HOLD_MS = 700;
+// Sentence syllables come from the build-time tag (SENT_META.y). The fallback
+// mirrors the vowel-group rule in scripts/build_words.py for anything the bank
+// doesn't carry, so nothing can freeze on a missing tag.
+const sylFallback = (tok) => {
+  const w = cleanToken(tok);
+  if (!w) return 0;
+  const g = w.match(/[aeiouy]+/g);
+  let n = g ? g.length : 0;
+  if (w.endsWith("e") && !/(le|ee|ie|oe|ye)$/.test(w) && n > 1) n -= 1;
+  return Math.max(1, n);
+};
+const sentSyl = (s) => SENT_META[s]?.y ?? s.split(/\s+/).reduce((a, t) => a + sylFallback(t), 0);
+// How long the item on screen holds in auto-pace. Words hold one beat; a
+// sentence holds for the syllables it actually contains.
+const holdMs = (it, wpm) => {
+  const base = (60 / wpm) * 1000;
+  const isSent = it && (it.kind === "bonus" || (it.kind === "couple" && it.beat === 2));
+  if (!isSent) return base;
+  const syl = Math.min(sentSyl(it.sentence), SENT_CAP_SYL);
+  return Math.max(MIN_HOLD_MS, LEAD_IN_MS + (syl / (wpm * WORD_SYL * CONNECTED)) * 60000);
+};
 
 // Staged practice session: warm-up words → 3×10 word→sentence couples that
 // escalate 1 → 2 → 3+ instances of the target sound (§6 ladder) → optional
@@ -89,17 +127,45 @@ const SCEN_EMPHASIS = { dr: 3, rest: 3 };
 const DRILL = "drill"; // the category-loaded sentences behave as one more pack
 const PACK_BANK = { ...SCENARIO_SENTENCES, [DRILL]: Object.values(SENTENCES).flat() };
 const PACK_IDS = [...SCENARIOS.map((s) => s.id), DRILL];
+// Which pack a sentence came from — the couples queue now picks by rung first
+// and uses this to keep the packs spread across the set.
+const SENT_PACK = {};
+PACK_IDS.forEach((p) => (PACK_BANK[p] || []).forEach((s) => { SENT_PACK[s] ??= p; }));
 
 // §6 ladder rung of a sentence: 1 / 2 / 3 = instances of its target sound
 // (from the build-time tags); 0 = no target sound, unusable as a couple.
 const rungOf = (s) => { const m = SENT_META[s]; return !m || !m.cat || m.n === 0 ? 0 : Math.min(m.n, 3); };
-// Couples set 1/2/3 normally targets rung 1/2/3. The difficulty check-in
-// shifts that whole ladder a rung up or down, so an "easy" answer at the first
-// warm-up break makes the sentence sets that follow busier (CB 2026-08-09).
-// The array is the fallback order for a rung whose bank comes up empty.
-const RUNG_ORDER = { 1: [1, 2, 3], 2: [2, 1, 3], 3: [3, 2, 1] };
-const rungOrder = (pos, adj) =>
-  RUNG_ORDER[Math.max(1, Math.min(3, pos + (adj >= 1 ? 1 : adj <= -1 ? -1 : 0)))];
+// §6 ladder, rebuilt 2026-08-19. Each couples set is now a MIX of rungs, not a
+// single rung with a fallback — the old version let a thin pack quietly drop a
+// set-3 slot down to a 1-instance sentence, which is why set 3 kept reading as
+// "normal sentences with one of the sound in them".
+// Numbers are sentences per 10 as [1-instance, 2-instance, 3+-instance]:
+//   Very easy   — stretch: doubles from set 1, set 3 is all triples
+//   Easy        — doubles from set 1, triples arrive in set 2
+//   Medium      — set 1 mostly singles, set 3 is ALL doubles and triples
+//   Kind of hard— some doubles, no triples anywhere
+//   Really hard — singles only, every set
+const RUNG_MIX = {
+  "2":  { 1: [2, 4, 4],  2: [0, 3, 7],  3: [0, 0, 10] },
+  "1":  { 1: [4, 4, 2],  2: [0, 5, 5],  3: [0, 2, 8] },
+  "0":  { 1: [8, 2, 0],  2: [1, 7, 2],  3: [0, 3, 7] },
+  "-1": { 1: [10, 0, 0], 2: [6, 4, 0],  3: [4, 6, 0] },
+  "-2": { 1: [10, 0, 0], 2: [10, 0, 0], 3: [10, 0, 0] },
+};
+// The n rung targets for one set, scaled from the per-10 mix and shuffled so
+// the density is spread through the set instead of stacked at the front.
+const rungPlan = (n, pos, adj) => {
+  const mix = RUNG_MIX[String(Math.max(-2, Math.min(2, Math.round(adj))))][Math.max(1, Math.min(3, pos))];
+  const plan = [];
+  mix.forEach((c, i) => { for (let k = 0; k < Math.round((c / 10) * n); k++) plan.push(i + 1); });
+  while (plan.length < n) plan.push(mix.indexOf(Math.max(...mix)) + 1);
+  plan.length = n;
+  for (let i = plan.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [plan[i], plan[j]] = [plan[j], plan[i]]; }
+  return plan;
+};
+// Fallback order when a rung's bank is exhausted — always toward MORE loading
+// first, so a shortage never silently makes the set easier than asked.
+const RUNG_FALLBACK = { 1: [1, 2, 3], 2: [2, 3, 1], 3: [3, 2, 1] };
 
 // §2: a scenario is session-ready when every ladder rung can fill a 10-couple
 // set. Thinner scenarios stay listed with an "In progress" badge.
@@ -125,6 +191,13 @@ const tierCounts = (total, adj = 0) => {
   c[5] = total - c[2] - c[3] - c[4];
   return c;
 };
+// Syllable bias inside each tier band (CB 2026-08-19: "really hard" should also
+// decrease the frequency of multi-syllable words). Tier already correlates with
+// length, but every band still spans 2–6 syllables, so this leans the draw
+// short when practice is too hard and long when it's too easy.
+const SYL_PREF = { "-2": (y) => 1 / (y * y), "-1": (y) => 1 / y, "0": () => 1, "1": (y) => y, "2": (y) => y * y };
+const sylWeight = (w, adj) => SYL_PREF[String(Math.max(-2, Math.min(2, Math.round(adj))))](WORD_META[w]?.y || 2);
+
 const WORDS_BY_TIER_CAT = {}; // tier -> cat -> [words]
 Object.keys(WORDS).forEach((c) => WORDS[c].forEach((w) => {
   const t = WORD_META[w]?.t;
@@ -182,7 +255,9 @@ export default function App() {
   const [useRec, setUseRec] = useState(saved?.useRec ?? true); // §8: recommended settings, ON by default
   const [manualRatings, setManualRatings] = useState(saved?.manualRatings ?? null); // kept across toggle flips
   const [paced, setPaced] = useState(saved?.paced ?? false); // false = self-paced (tap Next)
-  const [wpm, setWpm] = useState(saved?.wpm ?? 25);
+  // 30 WPM is the calibrated default (CB 2026-08-19); a user's own setting is
+  // saved and restored, so the slider is only touched once.
+  const [wpm, setWpm] = useState(saved?.wpm ?? 30);
   const [tickOn, setTickOn] = useState(saved?.tickOn ?? false); // metronome tick on each auto-paced word
   const [playing, setPlaying] = useState(false);
   const [item, setItem] = useState(null);
@@ -219,6 +294,40 @@ export default function App() {
   const wakeRef = useRef(null);
   const marksAppliedRef = useRef(true); // false only while a fresh summary awaits its hard-word taps
   const recentRef = useRef(saved?.recent ?? []); // last RECENT_GAP item keys, to space out repeats
+  // No-repeat rule (CB 2026-08-19). A SESSION is the warm-up word set plus the
+  // three sentence sets; inside it a practice word is never shown twice — not
+  // as a warm-up word, not as a couple's target word. Variety of pattern beats
+  // repetition of one word. (The Bonus Round sits outside that boundary: its
+  // whole design is to bring back a word already practiced today.)
+  const sessWordsRef = useRef(new Set());  // practice words used this session
+  const sessSentsRef = useRef(new Set());  // sentences used this session
+  // Same rule inside Sound pairs: no individual word repeats within a set, even
+  // across different pairs (so "thin/fin" rules out "thin/tin").
+  const pairWordsRef = useRef(new Set());
+  // Item history, so Back can step to the previous item without un-banking any
+  // progress. Next replays forward through it before generating anything new.
+  const viewRef = useRef({ list: [], pos: -1 });
+  const [viewPos, setViewPos] = useState(-1);
+  const show = (nx) => {
+    const v = viewRef.current;
+    v.list = [...v.list.slice(-40), nx];
+    v.pos = v.list.length - 1;
+    itemRef.current = nx;
+    setItem(nx);
+    setViewPos(v.pos);
+  };
+  const showAt = (pos) => {
+    const v = viewRef.current;
+    v.pos = pos;
+    itemRef.current = v.list[pos];
+    setItem(v.list[pos]);
+    setViewPos(pos);
+  };
+  const clearHistory = () => { viewRef.current = { list: [], pos: -1 }; setViewPos(-1); };
+  const goBack = () => {
+    const v = viewRef.current;
+    if (v.pos > 0) { setPlaying(false); showAt(v.pos - 1); }
+  };
 
   // Drop items shown within the last RECENT_GAP picks. If that empties the pool
   // (pool smaller than the gap — pairs, scenario packs), fall back to the
@@ -288,6 +397,18 @@ export default function App() {
     ? { bg:"#141824", card:"#1E2534", ink:"#B9CDF5", mut:"#9BA4B4", line:"#2D3648", blue:"#7FA4E8", onBlue:"#101A30", btn:"#3563C7", onBtn:"#FFFFFF", rust:"#D07A55", amber:"#E9B44C", chip:"#28324A", tex:"none" }
     : { bg:"#F3ECDC", card:"#FFFDF6", ink:"#012169", mut:"#5C647A", line:"#E0D6BD", blue:"#012169", onBlue:"#FFFFFF", btn:"#012169", onBtn:"#FFFFFF", rust:"#B4532A", amber:"#E9B44C", chip:"#ECE3CC", tex:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E")` };
   const S = (px) => Math.round(px * fontScale) + "px";
+  // Long words ("congratulations", "responsibility") ran off the screen at the
+  // fixed clamp (CB 2026-08-19). The second half of the min() is the largest
+  // size the word can be and still fit the viewport, so the text-size buttons
+  // scale type up only as far as it fits. `ratio` is the average glyph width in
+  // em for that weight of Atkinson Hyperlegible — measured worst case is 0.544
+  // bold / 0.506 regular, and these carry a margin for the fallback face.
+  const fitFont = (text, { vw, min, max, ratio }) =>
+    `calc(min(clamp(${min}px, ${vw}vw, ${max}px) * ${fontScale}, (100vw - 44px) / ${(Math.max(String(text).length, 1) * ratio).toFixed(2)}))`;
+  const wordFont = (w) => fitFont(w, { vw: 13, min: 40, max: 76, ratio: 0.58 });
+  // A sentence sizes to its longest single word, one size for the whole line.
+  const sentFont = (s) =>
+    fitFont(s.split(/\s+/).reduce((a, b) => (b.length > a.length ? b : a), ""), { vw: 10.4, min: 30, max: 61, ratio: 0.54 });
 
   // persist everything that should survive a close (A8 / M-persist)
   useEffect(() => {
@@ -326,7 +447,7 @@ export default function App() {
   const buildWarmupQueue = (total) => {
     const counts = tierCounts(total, diffAdj);
     const stats = statsRef.current;
-    const used = new Set();
+    const used = sessWordsRef.current; // session-wide: nothing repeats inside one session
     const pickFrom = (tier) => {
       for (let t = tier; t >= 2; t--) { // thin tiers borrow from the one below
         const avail = Object.keys(WORDS_BY_TIER_CAT[t] || {}).filter((c) => WORDS_BY_TIER_CAT[t][c].some((w) => !used.has(w)));
@@ -334,7 +455,7 @@ export default function App() {
         const cat = pickCat(ratings, avail);
         const cand = notRecent(WORDS_BY_TIER_CAT[t][cat].filter((w) => !used.has(w)));
         let tw = 0;
-        const ws = cand.map((w) => { const wt = hardWeight(stats[w]); tw += wt; return wt; });
+        const ws = cand.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj); tw += wt; return wt; });
         let r = Math.random() * tw;
         for (let i = 0; i < cand.length; i++) { r -= ws[i]; if (r <= 0) return cand[i]; }
         return cand[cand.length - 1];
@@ -350,42 +471,46 @@ export default function App() {
     return queue;
   };
 
-  // One couples set, built up front so the pack spread is guaranteed rather
-  // than left to n independent draws. Practice mode: every scenario pack takes
-  // a slot first, then the leftovers go to an emphasis-weighted draw (Doctor
-  // and Restaurant 3×). A scenario session draws all n from its own pack.
-  // Each slot then resolves to a sentence at the target rung, falling back
-  // through `order` and finally to any unused sentence in that pack.
-  const buildCouplesQueue = (n, order, scenOnly) => {
-    const slots = [];
-    if (scenOnly) for (let i = 0; i < n; i++) slots.push(scenOnly);
-    else {
-      SCENARIOS.forEach((sc) => { if (slots.length < n) slots.push(sc.id); }); // coverage first
-      while (slots.length < n) { // then emphasis decides what's left over
-        // Coverage already gave every pack one slot, so the leftovers are bid
-        // for with emphasis MINUS that slot — which lands Doctor and
-        // Restaurant at ~2.6 of a 10-set against exactly 1 for every other
-        // pack, i.e. the intended 3× priority with nothing squeezed out.
-        let tw = 0;
-        const ws = PACK_IDS.map((p) => { const w = p === DRILL ? 1 : (SCEN_EMPHASIS[p] ?? 1) - 1; tw += w; return w; });
-        let r = Math.random() * tw;
-        let pick = PACK_IDS[PACK_IDS.length - 1];
-        for (let i = 0; i < PACK_IDS.length; i++) { r -= ws[i]; if (r <= 0) { pick = PACK_IDS[i]; break; } }
-        slots.push(pick);
-      }
-      for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]]; }
-    }
-    const used = new Set();
+  // One couples set, built up front. Rewritten 2026-08-19: the RUNG comes
+  // first and the pack spread is what bends around it. The old version handed
+  // each pack a slot and then let that pack fall back down the ladder when it
+  // ran out of loaded sentences — which is how a set-3 slot ended up holding a
+  // 1-instance sentence. Now every slot is filled from ALL packs at its target
+  // rung, and pack variety is a tiebreak (fewest-used pack first, Doctor and
+  // Restaurant weighted 3× among equals).
+  // Nothing already used this session — sentence or target word — can appear.
+  const buildCouplesQueue = (n, plan, scenOnly) => {
+    const packs = scenOnly ? [scenOnly] : PACK_IDS;
+    const bank = packs.flatMap((p) => PACK_BANK[p] || []);
+    const usedSents = sessSentsRef.current;
+    const usedWords = sessWordsRef.current;
+    const packUse = {};
     const queue = [];
-    slots.forEach((p) => {
-      const bank = PACK_BANK[p] || [];
+    const free = (x, allowWordRepeat) =>
+      !usedSents.has(x) && (allowWordRepeat || !usedWords.has(SENT_META[x]?.w));
+    plan.forEach((rung) => {
       let cand = [];
-      for (const r of order) { cand = bank.filter((x) => rungOf(x) === r && !used.has(x)); if (cand.length) break; }
-      if (!cand.length) cand = bank.filter((x) => rungOf(x) > 0 && !used.has(x));
+      // Word-repeat-free candidates first; only if the rung would otherwise go
+      // unfilled do we relax that (never the rung — the rung is the point).
+      for (const strict of [false, true]) {
+        for (const r of RUNG_FALLBACK[rung]) {
+          cand = bank.filter((x) => rungOf(x) === r && free(x, strict));
+          if (cand.length) break;
+        }
+        if (cand.length) break;
+      }
       if (!cand.length) return;
       const list = notRecent(cand);
-      const sent = list[Math.floor(Math.random() * list.length)];
-      used.add(sent);
+      const minUse = Math.min(...list.map((x) => packUse[SENT_PACK[x]] || 0));
+      const spread = list.filter((x) => (packUse[SENT_PACK[x]] || 0) === minUse);
+      let tw = 0;
+      const ws = spread.map((x) => { const w = SCEN_EMPHASIS[SENT_PACK[x]] ?? 1; tw += w; return w; });
+      let r = Math.random() * tw;
+      let sent = spread[spread.length - 1];
+      for (let i = 0; i < spread.length; i++) { r -= ws[i]; if (r <= 0) { sent = spread[i]; break; } }
+      packUse[SENT_PACK[sent]] = (packUse[SENT_PACK[sent]] || 0) + 1;
+      usedSents.add(sent);
+      if (SENT_META[sent]?.w) usedWords.add(SENT_META[sent].w);
       queue.push(sent);
     });
     return queue;
@@ -400,9 +525,10 @@ export default function App() {
 
   const pickFromPool = (pool) => { // hard-marked words appear HARD_BOOST× as often
     const stats = statsRef.current;
-    const p = notRecent(pool);
+    const fresh = pool.filter((w) => !sessWordsRef.current.has(w)); // no repeats in a session
+    const p = notRecent(fresh.length ? fresh : pool);
     let total = 0;
-    const ws = p.map((w) => { const wt = hardWeight(stats[w]); total += wt; return wt; });
+    const ws = p.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj); total += wt; return wt; });
     let r = Math.random() * total;
     for (let i = 0; i < p.length; i++) { r -= ws[i]; if (r <= 0) return p[i]; }
     return p[p.length - 1];
@@ -436,14 +562,26 @@ export default function App() {
   };
 
   const next = () => {
+    // Stepped back? Walk forward through what was already shown before making
+    // anything new — replaying never re-banks progress.
+    const v = viewRef.current;
+    if (v.pos >= 0 && v.pos < v.list.length - 1) { showAt(v.pos + 1); return; }
     if (mode === "pairs") {
       if (doneRef.current >= setSize) return;
       const c = pickCat({ ...ratings, x: 3 }, Object.keys(PAIRS));
-      const list = notRecent(PAIRS[c], (p) => p[0] + "/" + p[1]);
+      // No individual word twice in a set, across pairs as well as within one.
+      // The pair bank is smaller than a 150-pair set, so a full sweep resets it.
+      const usedW = pairWordsRef.current;
+      const openIn = (cat) => PAIRS[cat].filter((p) => !usedW.has(p[0]) && !usedW.has(p[1]));
+      let open = openIn(c);
+      if (!open.length) open = Object.keys(PAIRS).flatMap(openIn);
+      if (!open.length) { usedW.clear(); open = PAIRS[c]; }
+      const list = notRecent(open, (p) => p[0] + "/" + p[1]);
       const nx = { cat: c, pair: list[Math.floor(Math.random() * list.length)] };
+      usedW.add(nx.pair[0]);
+      usedW.add(nx.pair[1]);
       markRecent(nx.pair[0] + "/" + nx.pair[1]);
-      itemRef.current = nx;
-      setItem(nx);
+      show(nx);
       doneRef.current += 1;
       setSetItems((p) => [...p, nx.pair[0] + " / " + nx.pair[1]]);
       bump(2, true); // a pair counts for 2 words
@@ -455,6 +593,8 @@ export default function App() {
     let s = sessRef.current;
     if (!s) {
       const totalWarm = (VARIANTS.find((x) => x.id === variant) || VARIANTS[1]).warmup.reduce((a, b) => a + b, 0);
+      sessWordsRef.current = new Set(); // a new session, a clean no-repeat slate
+      sessSentsRef.current = new Set();
       s = updSess({ plan: buildPlan(variant), idx: 0, count: 0, brk: false, finished: false, credits: 0,
         wq: mode === "scen" ? null : buildWarmupQueue(totalWarm), wqi: 0, sents: [] });
     }
@@ -475,8 +615,7 @@ export default function App() {
     if (cur && cur.kind === "couple" && cur.beat === 1) {
       // beat 2: the word inside its sentence; credit = the sentence's targets
       const nx = { ...cur, beat: 2 };
-      itemRef.current = nx;
-      setItem(nx);
+      show(nx);
       bump(nx.targets.length, false);
       updSess({ count: s.count + 1, credits: s.credits + nx.targets.length });
       return;
@@ -489,6 +628,7 @@ export default function App() {
         w = s.wq && s.wqi < s.wq.length ? s.wq[s.wqi] : pickFromPool(Object.values(WORDS).flat());
         s = updSess({ wqi: s.wqi + 1 });
       }
+      sessWordsRef.current.add(w);
       nx = { kind: "word", w };
       recordSeen(w);
       markRecent(w);
@@ -496,26 +636,29 @@ export default function App() {
       bump(1, false);
       updSess({ count: s.count + 1, credits: s.credits + 1 });
     } else if (entry.stage === "couples") {
-      // §6 ladder: couples set 1 uses 1-instance sentences, set 2 exactly 2,
-      // set 3 uses 3+. The whole set is queued up front (see
-      // buildCouplesQueue) so every scenario pack is represented; rebuilt when
-      // the set changes and when a Redo runs the same set again.
+      // §6 ladder: each set's rung mix comes from RUNG_MIX via the difficulty
+      // check-in — at Medium, set 3 is all 2- and 3-instance sentences. The
+      // whole set is queued up front (see buildCouplesQueue) so the mix and the
+      // pack spread are both guaranteed; rebuilt when the set changes and when
+      // a Redo runs the same set again.
       const pos = s.plan.slice(0, s.idx).filter((p) => p.stage === "couples").length + 1;
-      const order = rungOrder(pos, diffAdj);
       if (s.cqFor !== s.idx || s.cqi >= (s.cq?.length ?? 0)) {
-        s = updSess({ cq: buildCouplesQueue(entry.n, order, mode === "scen" ? scenario : null), cqi: 0, cqFor: s.idx });
+        s = updSess({ cq: buildCouplesQueue(entry.n, rungPlan(entry.n, pos, diffAdj), mode === "scen" ? scenario : null), cqi: 0, cqFor: s.idx });
       }
       let sent = s.cq[s.cqi];
       if (!sent) { // queue exhausted (thin pack) — fall back to a single draw
         const bank = (mode === "scen" && SCENARIO_SENTENCES[scenario]) || ALL_COUPLE_SENTS;
+        const want = rungPlan(1, pos, diffAdj)[0];
         let cand = [];
-        for (const r of order) { cand = bank.filter((x) => rungOf(x) === r); if (cand.length) break; }
+        for (const r of RUNG_FALLBACK[want]) { cand = bank.filter((x) => rungOf(x) === r && !sessSentsRef.current.has(x)); if (cand.length) break; }
         if (!cand.length) cand = bank;
         const list = notRecent(cand);
         sent = list[Math.floor(Math.random() * list.length)];
       }
       s = updSess({ cqi: s.cqi + 1 });
       const w = SENT_META[sent]?.w || topTarget(sent);
+      sessWordsRef.current.add(w);
+      sessSentsRef.current.add(sent);
       nx = { kind: "couple", sentence: sent, targets: targetsOf(sent), w, beat: 1, hint: !s.hinted };
       recordSeen(w);
       markRecent(sent);
@@ -535,8 +678,7 @@ export default function App() {
       bump(targets.length, false);
       updSess({ count: s.count + 1, credits: s.credits + targets.length });
     }
-    itemRef.current = nx;
-    setItem(nx);
+    show(nx);
   };
 
   // Break-screen controls: Continue advances, Redo re-runs the same stage-set,
@@ -548,6 +690,7 @@ export default function App() {
     updSess({ brk: false, count: 0, idx: redo ? s0.idx : s0.idx + 1 });
     itemRef.current = null;
     setItem(null);
+    clearHistory(); // Back never reaches across a break into the previous set
     next();
   };
   const skipStage = () => { setPlaying(false); resumeEntry(false); };
@@ -563,19 +706,21 @@ export default function App() {
   useEffect(() => {
     if (playing && paced) {
       let alive = true;
+      // §7: one shared WPM on one slider; a word holds one beat and a sentence
+      // holds for the syllables it actually contains (see holdMs).
       const step = () => {
         if (!alive) return;
-        // §7: one shared WPM on one slider; a sentence holds as a static block
-        // for its word count ÷ SENT_PACE, so it plays 50% faster per word than
-        // the warm-up words without the user setting a second number.
         next();
         if (tickOn) playTick();
-        const cur = itemRef.current;
-        const base = (60 / wpm) * 1000;
-        const isSent = cur && (cur.kind === "bonus" || (cur.kind === "couple" && cur.beat === 2));
-        timerRef.current = setTimeout(step, isSent ? (cur.sentence.split(/\s+/).length * base) / SENT_PACE : base);
+        timerRef.current = setTimeout(step, holdMs(itemRef.current, wpm));
       };
-      step();
+      // Start on what's already on screen instead of advancing past it — in the
+      // Bonus Round the first sentence used to vanish the instant you pressed
+      // Start (CB 2026-08-19). The clock now begins on the item you're reading.
+      if (itemRef.current && !sessRef.current?.brk) {
+        if (tickOn) playTick();
+        timerRef.current = setTimeout(step, holdMs(itemRef.current, wpm));
+      } else step();
       return () => { alive = false; clearTimeout(timerRef.current); };
     }
     return () => clearTimeout(timerRef.current);
@@ -683,6 +828,10 @@ export default function App() {
     setSess(null);
     setSetItems([]);
     setItem(null);
+    clearHistory();
+    sessWordsRef.current = new Set();
+    sessSentsRef.current = new Set();
+    pairWordsRef.current = new Set();
     setAward(null);
     setWarmAsk(false);
     setSumAsk(false);
@@ -690,7 +839,12 @@ export default function App() {
     setSumAnswer(null);
     setScreen("drill");
   };
-  const switchMode = (m) => { setPlaying(false); setMode(m); setItem(null); itemRef.current = null; doneRef.current = 0; setSetItems([]); sessRef.current = null; setSess(null); }; // each set is one mode — hard-word review never mixes words with pairs
+  // each set is one mode — hard-word review never mixes words with pairs
+  const switchMode = (m) => {
+    setPlaying(false); setMode(m); setItem(null); itemRef.current = null; doneRef.current = 0;
+    setSetItems([]); sessRef.current = null; setSess(null); clearHistory();
+    sessWordsRef.current = new Set(); sessSentsRef.current = new Set(); pairWordsRef.current = new Set();
+  };
   // One check-in answer, from either ask point (the gates already closed when
   // the ask opened). It logs the answer and moves the difficulty dial, which
   // steers both the warm-up tier mix and the sentence ladder from here on.
@@ -698,7 +852,7 @@ export default function App() {
     const lvl = DIFF_LEVELS.find((l) => l.id === v);
     setDiffChecks((c) => [...c, { d: todayKey, v, sess: sessDone }]);
     (where === "warmup" ? setWarmAnswer : setSumAnswer)(v);
-    if (lvl?.adj) setDiffAdj((a) => Math.max(-2, Math.min(2, a + lvl.adj)));
+    setDiffAdj(lvl?.adj ?? 0); // latest read wins — the dial no longer accumulates
   };
   const togglePaced = () => { setPlaying(false); setPaced((p) => !p); };
 
@@ -732,15 +886,24 @@ export default function App() {
     .word { font-weight: 700; font-size: calc(clamp(44px, 13vw, 76px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
     .pairWrap { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px 20px; align-items: baseline; justify-content: center; }
     .pair2 { font-weight: 700; font-size: calc(clamp(44px, 13vw, 76px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
-    .sentWrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; max-width: 900px; }
-    .sw { font-weight: 400; font-size: calc(clamp(35px, 10.4vw, 61px) * ${fontScale}); line-height: 1.1; color: ${T.blue}; padding: 0 4px; border-radius: 12px; }
+    .sentWrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; max-width: 900px; font-size: calc(clamp(35px, 10.4vw, 61px) * ${fontScale}); }
+    .sw { font-weight: 400; font-size: inherit; line-height: 1.1; color: ${T.blue}; padding: 0 4px; border-radius: 12px; }
     .sw.tgt { font-weight: 700; background: ${T.chip}; }
     .coupleHint { margin-top: 18px; font-size: ${S(24)}; color: ${T.ink}; text-align: center; line-height: 1.35; }
     .idle { color: ${T.mut}; font-size: ${S(17)}; text-align: center; max-width: 340px; line-height: 1.5; }
     .controls { padding: 0 16px 26px; }
-    .paceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; background: ${T.card}; border-radius: 16px; padding: 10px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(20,25,40,0.10); min-height: 60px; }
-    .paceVal { font-weight: 700; font-size: 15px; min-width: 44px; text-align: right; }
-    input[type=range] { flex: 1; accent-color: ${T.blue}; height: 28px; }
+    .paceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: ${T.card}; border-radius: 16px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(20,25,40,0.10); min-height: 60px; }
+    /* Pace controls are sized for elderly hands (CB 2026-08-19): a 52px thumb
+       on an 18px track, big −/+ steppers either side, and a value you can read
+       across the room. */
+    .paceWrap { display: flex; align-items: center; gap: 10px; width: 100%; }
+    .paceVal { font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(24)}; min-width: 116px; text-align: center; }
+    .paceStep { width: 64px; height: 64px; flex-shrink: 0; border-radius: 18px; border: 2px solid ${T.btn}; background: ${T.card}; color: ${T.btn}; font-weight: 700; font-size: 30px; line-height: 1; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
+    input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 120px; min-width: 100px; background: transparent; height: 64px; margin: 0; }
+    input[type=range]::-webkit-slider-runnable-track { height: 18px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 52px; height: 52px; margin-top: -17px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
+    input[type=range]::-moz-range-track { height: 18px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
+    input[type=range]::-moz-range-thumb { width: 52px; height: 52px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
     .switch { display: flex; align-items: center; gap: 10px; border: none; background: none; cursor: pointer; padding: 8px 0; min-height: 44px; font-family: 'Atkinson Hyperlegible'; }
     .swLbl { font-size: ${S(14)}; font-weight: 700; color: ${T.ink}; white-space: nowrap; }
     .track { width: 46px; height: 26px; border-radius: 999px; background: ${dark ? "#3A4560" : "#CFC5AB"}; position: relative; flex-shrink: 0; }
@@ -748,9 +911,12 @@ export default function App() {
     .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left 0.15s; }
     .track.on .knob { left: 23px; }
     .btnRow { display: flex; gap: 10px; }
-    .play { flex: 2; padding: 16px; border: none; border-radius: 16px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(17)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
+    /* Drill buttons are the app's main target — 88px tall, big type. */
+    .play { flex: 2; padding: 22px 16px; min-height: 88px; border: none; border-radius: 20px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(26)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
     .play.stop { background: ${T.rust}; color: #fff; }
-    .ghost { flex: 1; padding: 16px; border-radius: 16px; border: 1.5px solid ${T.line}; background: ${T.card}; font-weight: 700; font-size: ${S(14)}; color: ${T.ink}; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
+    .ghost { flex: 1; padding: 16px 12px; border-radius: 16px; border: 1.5px solid ${T.line}; background: ${T.card}; font-weight: 700; font-size: ${S(14)}; color: ${T.ink}; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
+    .btnRow .ghost { min-height: 88px; border-radius: 20px; font-size: ${S(20)}; border-width: 2px; }
+    .btnRow .ghost:disabled { opacity: 0.4; cursor: default; }
     .meta { text-align: center; font-size: ${S(14)}; color: ${T.mut}; margin-top: 10px; }
     .setBar { height: 6px; border-radius: 999px; background: ${T.line}; margin: 0 16px 4px; overflow: hidden; }
     .setFill { height: 100%; background: ${T.btn}; border-radius: 999px; transition: width 0.3s; }
@@ -1371,15 +1537,15 @@ export default function App() {
             <button className="ghost" style={{ display: "block", width: "100%" }} onClick={() => resumeEntry(true)}>Redo that set</button>
           </div>
         ))}
-        {item && !sess?.brk && item.kind === "word" && <div className="word">{item.w}</div>}
+        {item && !sess?.brk && item.kind === "word" && <div className="word" style={{ fontSize: wordFont(item.w) }}>{item.w}</div>}
         {item && !sess?.brk && item.kind === "couple" && item.beat === 1 && (
           <>
-            <div className="word">{item.w}</div>
+            <div className="word" style={{ fontSize: wordFont(item.w) }}>{item.w}</div>
             {item.hint && <div className="coupleHint">say it — its sentence comes next</div>}
           </>
         )}
         {item && !sess?.brk && (item.kind === "bonus" || (item.kind === "couple" && item.beat === 2)) && (
-          <div className="sentWrap">
+          <div className="sentWrap" style={{ fontSize: sentFont(item.sentence) }}>
             {(() => {
               // §5: exactly one highlighted word — the couple's target (or the
               // session word a bonus sentence carries), first occurrence only.
@@ -1393,8 +1559,8 @@ export default function App() {
         )}
         {item && mode === "pairs" && item.pair && (
           <div className="pairWrap">
-            <div className="word">{item.pair[0]}</div>
-            <div className="pair2">{item.pair[1]}</div>
+            <div className="word" style={{ fontSize: wordFont(item.pair[0]) }}>{item.pair[0]}</div>
+            <div className="pair2" style={{ fontSize: wordFont(item.pair[1]) }}>{item.pair[1]}</div>
           </div>
         )}
       </div>
@@ -1410,8 +1576,6 @@ export default function App() {
           </button>
           {paced && (
             <>
-              <input type="range" min="10" max="150" step="5" value={wpm}
-                onChange={(e) => setWpm(parseInt(e.target.value))} />
               <span className="paceVal">{wpm} wpm</span>
               <button className="switch" onClick={() => {
                 const on = !tickOn;
@@ -1421,10 +1585,23 @@ export default function App() {
                 <span className={"track" + (tickOn ? " on" : "")}><span className="knob" /></span>
                 <span className="swLbl">Tick</span>
               </button>
+              {/* The slider gets a full row to itself with big steppers either
+                  side — a thumb you can hit and a value you can read without
+                  reading glasses (CB 2026-08-19: these are elderly patients). */}
+              <div className="paceWrap">
+                <button className="paceStep" onClick={() => setWpm((w) => Math.max(10, w - 5))} aria-label="Slower pace">−</button>
+                <input type="range" min="10" max="150" step="5" value={wpm} aria-label="Words per minute"
+                  onChange={(e) => setWpm(parseInt(e.target.value))} />
+                <button className="paceStep" onClick={() => setWpm((w) => Math.min(150, w + 5))} aria-label="Faster pace">+</button>
+              </div>
             </>
           )}
         </div>
         <div className="btnRow">
+          {/* Back steps to the previous item without un-banking any progress —
+              available in the sentence sets and everywhere else (CB
+              2026-08-19). It pauses auto-pace so nothing moves under you. */}
+          <button className="ghost" onClick={goBack} disabled={viewPos <= 0} aria-label="Back to the previous item">Back</button>
           {paced ? (
             <>
               <button className={"play" + (playing ? " stop" : "")} onClick={() => { if (mode === "scen" && !scenario) return; if (tickOn) ensureAudio(); setPlaying(!playing); }}>
@@ -1433,7 +1610,7 @@ export default function App() {
               <button className="ghost" onClick={next}>Next</button>
             </>
           ) : (
-            <button className="play" style={{ flex: 1 }} onClick={next}>
+            <button className="play" style={{ flex: 2 }} onClick={next}>
               {item ? "Next" : "Start"}
             </button>
           )}
