@@ -490,10 +490,13 @@ export default function App() {
       !usedSents.has(x) && (allowWordRepeat || !usedWords.has(SENT_META[x]?.w));
     plan.forEach((rung) => {
       let cand = [];
-      // Word-repeat-free candidates first; only if the rung would otherwise go
-      // unfilled do we relax that (never the rung — the rung is the point).
-      for (const strict of [false, true]) {
-        for (const r of RUNG_FALLBACK[rung]) {
+      // The RUNG is the point, so it outranks the no-repeat rule: hold the rung
+      // and relax the word rule before dropping a slot down the ladder. (Nested
+      // the other way round, a small scenario pack whose remaining loaded
+      // sentences all reused a target word would quietly serve a 1-instance
+      // sentence in set 3 — the exact thing this rewrite exists to stop.)
+      for (const r of RUNG_FALLBACK[rung]) {
+        for (const strict of [false, true]) {
           cand = bank.filter((x) => rungOf(x) === r && free(x, strict));
           if (cand.length) break;
         }
