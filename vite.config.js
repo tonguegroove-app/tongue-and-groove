@@ -1,9 +1,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { execSync } from "child_process";
+
+// Build stamp, shown at the bottom of Settings. This app is an installed PWA,
+// so a phone can keep running an old bundle after a fix ships — twice now a bug
+// has been re-reported that was already fixed and deployed. The stamp makes
+// "which version is actually on the phone" a thing you can read, not guess.
+const stamp = (() => {
+  try {
+    const sha = execSync("git rev-parse --short HEAD").toString().trim();
+    // Quote the date format — the space in it splits into a second argument
+    // otherwise and git treats it as a pathspec.
+    const d = execSync('git log -1 --format=%cd --date=format:"%Y-%m-%d %H:%M"').toString().trim();
+    return `${d} · ${sha}`;
+  } catch { return "dev"; }
+})();
 
 export default defineConfig({
   base: "/tongue-and-groove/",
+  define: { __BUILD__: JSON.stringify(stamp) },
   plugins: [
     react(),
     VitePWA({

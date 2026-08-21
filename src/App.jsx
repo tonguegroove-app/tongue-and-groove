@@ -5,6 +5,9 @@ import { loadState, saveState, dkey } from "./storage.js";
 
 const saved = loadState();
 
+// Build stamp injected by vite.config.js — shown in Settings.
+const BUILD = typeof __BUILD__ === "string" ? __BUILD__ : "dev";
+
 // Difficulty check-in — five levels, and the only feedback the app asks for
 // now that hard-word marking is paused (see HARD_MARKS below). Two ask points
 // (CB 2026-08-09):
@@ -930,11 +933,12 @@ export default function App() {
     .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left 0.15s; }
     .track.on .knob { left: 23px; }
     .btnRow { display: flex; gap: 10px; }
-    /* Drill buttons are the app's main target — 88px tall, big type. */
-    .play { flex: 2; padding: 22px 16px; min-height: 88px; border: none; border-radius: 20px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(26)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
+    /* Drill buttons: comfortably bigger than the 44px minimum without taking
+       over the screen (CB 2026-08-20 — 88px read as too large). */
+    .play { flex: 2; padding: 16px; min-height: 64px; border: none; border-radius: 18px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(20)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
     .play.stop { background: ${T.rust}; color: #fff; }
     .ghost { flex: 1; padding: 16px 12px; border-radius: 16px; border: 1.5px solid ${T.line}; background: ${T.card}; font-weight: 700; font-size: ${S(14)}; color: ${T.ink}; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
-    .btnRow .ghost { min-height: 88px; border-radius: 20px; font-size: ${S(20)}; border-width: 2px; }
+    .btnRow .ghost { min-height: 64px; border-radius: 18px; font-size: ${S(16)}; border-width: 2px; }
     .btnRow .ghost:disabled { opacity: 0.4; cursor: default; }
     .meta { text-align: center; font-size: ${S(14)}; color: ${T.mut}; margin-top: 10px; }
     .setBar { height: 6px; border-radius: 999px; background: ${T.line}; margin: 0 16px 4px; overflow: hidden; }
@@ -1286,6 +1290,16 @@ export default function App() {
               <button className="hdrBtn" onClick={goRescore}>See</button>
             </div>
           )}
+          {/* Which build is actually running. An installed PWA can keep serving
+              an old bundle after a fix ships, so this is here to be read aloud
+              when something looks unfixed. */}
+          <div className="setting">
+            <span className="setLbl" style={{ color: T.mut, fontWeight: 400, fontSize: S(14) }}>Version {BUILD}</span>
+            <button className="hdrBtn" style={{ background: "none", color: T.blue, border: "1.5px solid " + T.line }}
+              onClick={() => { if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.update()))).finally(() => window.location.reload(true)); else window.location.reload(true); }}>
+              Check for update
+            </button>
+          </div>
         </div>
         <SizeRow />
       </div>
