@@ -32,6 +32,13 @@ const DIFF_LEVELS = [
   { id: "hard", label: "Kind of hard", adj: -1 },
   { id: "vhard", label: "Really hard", adj: -2 },
 ];
+// The acknowledgement reads as a non-sequitur on its own — "we'll mix in
+// harder words from here" only makes sense next to the answer that earned it
+// (CB 2026-08-21). diffEcho puts the choice back in front of it.
+const diffEcho = (v) => {
+  const l = DIFF_LEVELS.find((x) => x.id === v);
+  return l ? `You said ${l.label.toLowerCase()}.` : "";
+};
 const DIFF_ACK = {
   veasy: "Then let's stretch you — harder words and busier sentences from here.",
   easy: "Good to know — we'll mix in harder words from here.",
@@ -70,14 +77,21 @@ const hardWeight = (st) => (HARD_MARKS && st?.h > 0 ? HARD_BOOST : 1);
 //   hold = LEAD_IN + syllables / (wpm × WORD_SYL × CONNECTED)
 // Calibrated so the AVERAGE sentence still holds ~8.1 s at 30 WPM — the tempo
 // CB tuned by hand — and only the spread across sentences changes.
-const WORD_SYL = 2.6;      // measured mean syllables of the warm-up word pool
+// 2.6 was the measured mean syllables of the warm-up word pool — the honest
+// starting point. CB read the result as still too slow and asked for another
+// 50% (2026-08-21), so the divisor is 2.6 × 1.5. Sentences now run half again
+// as fast as a word of the same syllable count; the ratio between sentences is
+// untouched, only the tempo.
+const WORD_SYL = 3.9;
 const CONNECTED = 1.0;     // extra per-syllable speed-up for connected speech;
                            // the syllable model absorbs what SENT_PACE faked,
                            // so this is the one honest knob left to turn.
 const LEAD_IN_MS = 350;    // breath + onset, once per sentence, doesn't scale
 // Ceiling on a single sentence (CB 2026-08-19: cap at 12.6 s). Expressed in
-// syllables so it scales with the slider — 16 syllables is 12.65 s at 30 WPM,
-// and a slower setting still gets its slower hold.
+// syllables so it scales with the slider. After the 2026-08-21 speed-up the
+// same 16 syllables is 8.56 s at 30 WPM — the ceiling came down with
+// everything else, which is the point. The longest sentence in the bank is 17
+// syllables, so this now only guards against a long one being added later.
 const SENT_CAP_SYL = 16;
 const MIN_HOLD_MS = 700;
 // Sentence syllables come from the build-time tag (SENT_META.y). The fallback
@@ -179,6 +193,33 @@ const RUNG_FALLBACK = { 1: [1, 2, 3], 2: [2, 3, 1], 3: [3, 2, 1] };
 // Deliberately applied INSIDE a rung, never across rungs: usefulness picks
 // which sentence, the ladder still decides how loaded it has to be.
 const useWeight = (s) => { const p = SENT_META[s]?.p ?? 3; return p * p; };
+
+// Quality of a sentence's beat-1 word, for set 1 only (CB 2026-08-21: "why are
+// some words so easy — words like staff, words like cart?"). Set 1 is where a
+// sentence carries a single instance of its sound, so the WORD is most of the
+// work, and 39% of the rung-1 bank was handing over a one-syllable target.
+// Three signals, multiplied:
+//   • syllables — a monosyllable is barely a motor plan, so it draws at a
+//     fifth the rate of a two-syllable word and an eighth of a three. The
+//     pack-spread tiebreak runs BEFORE this weight and narrows the candidates
+//     as a set fills, which halves whatever the weight does; 0.2 is what lands
+//     a simulated set 1 at ~15% one-syllable words, down from 42%. Not zero —
+//     "please" and "thank" earn their place in a scenario line.
+//   • in the drill pool — WORD_META holds exactly the words that survived the
+//     top-1,500 frequency cut AND the single-syllable cull, so membership is
+//     "common enough to be worth practising". Only 17% of rung-1 targets are
+//     in it and one pack has none, so it lifts rather than filters.
+//   • the patient's own rating for that sound, squared — the injury type is
+//     supposed to dominate the mix, and squaring makes a 5 twenty-five times a
+//     1 instead of five times.
+const TGT_SYL = { 1: 0.2, 2: 1, 3: 1.6 };
+const targetWeight = (s, ratings) => {
+  const m = SENT_META[s];
+  if (!m?.w) return 1;
+  const y = WORD_META[m.w]?.y ?? sylFallback(m.w);
+  const rate = ratings?.[m.cat] || 3;
+  return (TGT_SYL[Math.min(y, 3)] ?? 1.6) * (WORD_META[m.w] ? 1.8 : 1) * rate * rate;
+};
 const weightedPick = (pool) => {
   let tw = 0;
   const ws = pool.map((x) => { const w = useWeight(x); tw += w; return w; });
@@ -309,6 +350,7 @@ export default function App() {
   const statsRef = useRef(wordStats);
   useEffect(() => { statsRef.current = wordStats; }, [wordStats]);
   const timerRef = useRef(null);
+  const rearmRef = useRef(null); // set by the paced effect; lets Next restart the hold
   const itemRef = useRef(null);
   const doneRef = useRef(0);
   const wakeRef = useRef(null);
@@ -423,9 +465,21 @@ export default function App() {
   // scale type up only as far as it fits. `ratio` is the average glyph width in
   // em for that weight of Atkinson Hyperlegible — measured worst case is 0.544
   // bold / 0.506 regular, and these carry a margin for the fallback face.
-  const fitFont = (text, { vw, min, max, ratio }) =>
-    `calc(min(clamp(${min}px, ${vw}vw, ${max}px) * ${fontScale}, (100vw - 44px) / ${(Math.max(String(text).length, 1) * ratio).toFixed(2)}))`;
-  const wordFont = (w) => fitFont(w, { vw: 13, min: 40, max: 76, ratio: 0.58 });
+  const fitFont = (text, { vw, min, max, ratio, pad = 44 }) =>
+    `calc(min(clamp(${min}px, ${vw}vw, ${max}px) * ${fontScale}, (100vw - ${pad}px) / ${(Math.max(String(text).length, 1) * ratio).toFixed(2)}))`;
+  // Warm-up and beat-1 words must all render at the SAME size (CB 2026-08-21 —
+  // the type was drifting word to word). It only drifts where the fit half of
+  // the min() bites, so the base is set low enough that everything up to 14
+  // characters clears it: 11.6vw against a 0.56 ratio puts the crossover at
+  // 358 / (11.6 × 0.56) ≈ 14.1 characters, and the crossover is the same on
+  // every screen width because both halves scale with vw. Of the 276 words in
+  // the pool exactly five are longer than that, and those are the ones that
+  // genuinely can't fit. The clamp floor is 34 rather than 40 so a 320px phone
+  // doesn't fall back to a fixed size and reintroduce the drift.
+  // A lone word sits in a 16px-padded stage and nothing else shares its line,
+  // so 36px of gutter is honest — the 44 the sentences use would pull the
+  // crossover back under 14 characters and start the drift again.
+  const wordFont = (w) => fitFont(w, { vw: 11.6, min: 34, max: 70, ratio: 0.56, pad: 36 });
   // A sentence sizes to its longest single word, one size for the whole line.
   const sentFont = (s) =>
     fitFont(s.split(/\s+/).reduce((a, b) => (b.length > a.length ? b : a), ""), { vw: 10.4, min: 30, max: 61, ratio: 0.54 });
@@ -526,8 +580,15 @@ export default function App() {
       const list = notRecent(cand);
       const minUse = Math.min(...list.map((x) => packUse[SENT_PACK[x]] || 0));
       const spread = list.filter((x) => (packUse[SENT_PACK[x]] || 0) === minUse);
+      // Set 1 additionally weights the beat-1 word itself; sets 2 and 3 are
+      // about sound density and CB confirmed they read fine, so they're left
+      // exactly as they were.
       let tw = 0;
-      const ws = spread.map((x) => { const w = (SCEN_EMPHASIS[SENT_PACK[x]] ?? 1) * useWeight(x); tw += w; return w; });
+      const ws = spread.map((x) => {
+        const w = (SCEN_EMPHASIS[SENT_PACK[x]] ?? 1) * useWeight(x) * (rung === 1 ? targetWeight(x, ratings) : 1);
+        tw += w;
+        return w;
+      });
       let r = Math.random() * tw;
       let sent = spread[spread.length - 1];
       for (let i = 0; i < spread.length; i++) { r -= ws[i]; if (r <= 0) { sent = spread[i]; break; } }
@@ -730,20 +791,33 @@ export default function App() {
       let alive = true;
       // §7: one shared WPM on one slider; a word holds one beat and a sentence
       // holds for the syllables it actually contains (see holdMs).
+      // arm() always cancels first, so the item on screen gets its OWN full
+      // hold and never inherits what was left of the previous one.
+      const arm = () => {
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(step, holdMs(itemRef.current, wpm));
+      };
       const step = () => {
         if (!alive) return;
         next();
         if (tickOn) playTick();
-        timerRef.current = setTimeout(step, holdMs(itemRef.current, wpm));
+        arm();
       };
+      // Tapping Next mid-drill advances the item but used to leave the running
+      // timer alone (CB 2026-08-21), which broke two ways at once: stepping off
+      // a long sentence onto a word left the word sitting there for the rest of
+      // the sentence's hold, and stepping onto the last Bonus sentence with only
+      // a moment left on the clock flashed it up and moved straight past it.
+      // The button now re-arms, so Next means "this item, from the top".
+      rearmRef.current = () => { if (alive) arm(); };
       // Start on what's already on screen instead of advancing past it — in the
       // Bonus Round the first sentence used to vanish the instant you pressed
       // Start (CB 2026-08-19). The clock now begins on the item you're reading.
       if (itemRef.current && !sessRef.current?.brk) {
         if (tickOn) playTick();
-        timerRef.current = setTimeout(step, holdMs(itemRef.current, wpm));
+        arm();
       } else step();
-      return () => { alive = false; clearTimeout(timerRef.current); };
+      return () => { alive = false; rearmRef.current = null; clearTimeout(timerRef.current); };
     }
     return () => clearTimeout(timerRef.current);
   }, [playing, wpm, mode, ratings, paced, tickOn]);
@@ -905,28 +979,29 @@ export default function App() {
     .tab { flex: 1; padding: 12px 6px; border-radius: 12px; border: 1.5px solid ${T.line}; background: ${T.card}; font-weight: 700; font-size: ${S(15)}; color: ${T.mut}; cursor: pointer; min-height: 44px; font-family: 'Atkinson Hyperlegible'; }
     .tab.on { background: ${T.btn}; border-color: ${T.btn}; color: ${T.onBtn}; }
     .stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px; padding: 10px 16px; }
-    .word { font-weight: 700; font-size: calc(clamp(44px, 13vw, 76px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
+    .word { font-weight: 700; font-size: calc(clamp(34px, 11.6vw, 70px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
     .pairWrap { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px 20px; align-items: baseline; justify-content: center; }
-    .pair2 { font-weight: 700; font-size: calc(clamp(44px, 13vw, 76px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
+    .pair2 { font-weight: 700; font-size: calc(clamp(34px, 11.6vw, 70px) * ${fontScale}); letter-spacing: -0.01em; text-align: center; line-height: 1.05; color: ${T.blue}; }
     .sentWrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; max-width: 900px; font-size: calc(clamp(35px, 10.4vw, 61px) * ${fontScale}); }
     .sw { font-weight: 400; font-size: inherit; line-height: 1.1; color: ${T.blue}; padding: 0 4px; border-radius: 12px; }
     .sw.tgt { font-weight: 700; background: ${T.chip}; }
     .coupleHint { margin-top: 18px; font-size: ${S(24)}; color: ${T.ink}; text-align: center; line-height: 1.35; }
     .idle { color: ${T.mut}; font-size: ${S(17)}; text-align: center; max-width: 340px; line-height: 1.5; }
     .controls { padding: 0 16px 26px; }
-    .paceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: ${T.card}; border-radius: 16px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(20,25,40,0.10); min-height: 60px; }
-    /* Pace controls are sized for elderly hands (CB 2026-08-19): a 52px thumb
-       on an 18px track, big −/+ steppers either side, and a value you can read
-       across the room. */
-    .paceWrap { display: flex; align-items: center; gap: 10px; width: 100%; }
-    .paceVal { font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(24)}; min-width: 116px; text-align: center; }
-    .paceStep { width: 64px; height: 64px; flex-shrink: 0; border-radius: 18px; border: 2px solid ${T.btn}; background: ${T.card}; color: ${T.btn}; font-weight: 700; font-size: 30px; line-height: 1; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
-    input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 120px; min-width: 100px; background: transparent; height: 64px; margin: 0; }
-    input[type=range]::-webkit-slider-runnable-track { height: 18px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
-    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 52px; height: 52px; margin-top: -17px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
-    input[type=range]::-moz-range-track { height: 18px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
-    input[type=range]::-moz-range-thumb { width: 52px; height: 52px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
-    .switch { display: flex; align-items: center; gap: 10px; border: none; background: none; cursor: pointer; padding: 8px 0; min-height: 44px; font-family: 'Atkinson Hyperlegible'; }
+    /* Pace controls are sized for elderly hands (CB 2026-08-19), then trimmed
+       back once they were on a real phone (CB 2026-08-21): thumb and steppers
+       down 20%, the readout down 30%, and the whole card tightened so the
+       sentence above it keeps the room. Still well clear of the 44px target. */
+    .paceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; background: ${T.card}; border-radius: 14px; padding: 7px 12px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(20,25,40,0.10); min-height: 0; }
+    .paceWrap { display: flex; align-items: center; gap: 8px; width: 100%; }
+    .paceVal { font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(17)}; min-width: 82px; text-align: center; }
+    .paceStep { width: 51px; height: 51px; flex-shrink: 0; border-radius: 15px; border: 2px solid ${T.btn}; background: ${T.card}; color: ${T.btn}; font-weight: 700; font-size: 24px; line-height: 1; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
+    input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 120px; min-width: 100px; background: transparent; height: 51px; margin: 0; }
+    input[type=range]::-webkit-slider-runnable-track { height: 16px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 42px; height: 42px; margin-top: -13px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
+    input[type=range]::-moz-range-track { height: 16px; border-radius: 999px; background: ${dark ? "#3A4560" : "#DED3B7"}; }
+    input[type=range]::-moz-range-thumb { width: 42px; height: 42px; border-radius: 50%; background: ${T.btn}; border: 4px solid ${T.card}; box-shadow: 0 2px 5px rgba(20,25,40,0.35); cursor: pointer; }
+    .switch { display: flex; align-items: center; gap: 10px; border: none; background: none; cursor: pointer; padding: 4px 0; min-height: 44px; font-family: 'Atkinson Hyperlegible'; }
     .swLbl { font-size: ${S(14)}; font-weight: 700; color: ${T.ink}; white-space: nowrap; }
     .track { width: 46px; height: 26px; border-radius: 999px; background: ${dark ? "#3A4560" : "#CFC5AB"}; position: relative; flex-shrink: 0; }
     .track.on { background: ${T.blue}; }
@@ -934,11 +1009,13 @@ export default function App() {
     .track.on .knob { left: 23px; }
     .btnRow { display: flex; gap: 10px; }
     /* Drill buttons: comfortably bigger than the 44px minimum without taking
-       over the screen (CB 2026-08-20 — 88px read as too large). */
-    .play { flex: 2; padding: 16px; min-height: 64px; border: none; border-radius: 18px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(20)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
+       over the screen (CB 2026-08-20 — 88px read as too large; 2026-08-21 —
+       another 25% off Back/Start/Next). The box shrinks 64 → 48px; the labels
+       come down far less, because these still have to be readable. */
+    .play { flex: 2; padding: 12px; min-height: 48px; border: none; border-radius: 14px; font-family: 'Bricolage Grotesque'; font-weight: 700; font-size: ${S(18)}; cursor: pointer; background: ${T.btn}; color: ${T.onBtn}; }
     .play.stop { background: ${T.rust}; color: #fff; }
     .ghost { flex: 1; padding: 16px 12px; border-radius: 16px; border: 1.5px solid ${T.line}; background: ${T.card}; font-weight: 700; font-size: ${S(14)}; color: ${T.ink}; cursor: pointer; font-family: 'Atkinson Hyperlegible'; }
-    .btnRow .ghost { min-height: 64px; border-radius: 18px; font-size: ${S(16)}; border-width: 2px; }
+    .btnRow .ghost { min-height: 48px; padding: 12px 10px; border-radius: 14px; font-size: ${S(15)}; border-width: 2px; }
     .btnRow .ghost:disabled { opacity: 0.4; cursor: default; }
     .meta { text-align: center; font-size: ${S(14)}; color: ${T.mut}; margin-top: 10px; }
     .setBar { height: 6px; border-radius: 999px; background: ${T.line}; margin: 0 16px 4px; overflow: hidden; }
@@ -1205,7 +1282,9 @@ export default function App() {
             <h2>How was that?</h2>
             {sumAnswer ? (
               <>
-                <p className="sub" style={{ marginBottom: 0 }}>{DIFF_ACK[sumAnswer]}</p>
+                <p className="sub" style={{ marginBottom: 0 }}>
+                  <b>{diffEcho(sumAnswer)}</b> {DIFF_ACK[sumAnswer]}
+                </p>
                 {sumAnswer === "vhard" && paced && (
                   <button className="condBtn" style={{ marginTop: 10 }}
                     onClick={() => setWpm((w) => Math.max(10, w - 5))}>Slow the pace to {Math.max(10, wpm - 5)} WPM</button>
@@ -1550,7 +1629,9 @@ export default function App() {
                 <p className="idle" style={{ margin: "0 auto 10px" }}>How was that?</p>
                 {warmAnswer ? (
                   <>
-                    <p className="idle" style={{ margin: "0 auto 10px" }}>{DIFF_ACK[warmAnswer]}</p>
+                    <p className="idle" style={{ margin: "0 auto 10px" }}>
+                      <b style={{ color: T.ink }}>{diffEcho(warmAnswer)}</b> {DIFF_ACK[warmAnswer]}
+                    </p>
                     {warmAnswer === "vhard" && paced && (
                       <button className="condBtn" style={{ margin: "0 0 4px" }}
                         onClick={() => setWpm((w) => Math.max(10, w - 5))}>Slow the pace to {Math.max(10, wpm - 5)} WPM</button>
@@ -1640,7 +1721,7 @@ export default function App() {
               <button className={"play" + (playing ? " stop" : "")} onClick={() => { if (mode === "scen" && !scenario) return; if (tickOn) ensureAudio(); setPlaying(!playing); }}>
                 {playing ? "Pause" : "Start"}
               </button>
-              <button className="ghost" onClick={next}>Next</button>
+              <button className="ghost" onClick={() => { next(); rearmRef.current?.(); }}>Next</button>
             </>
           ) : (
             <button className="play" style={{ flex: 2 }} onClick={next}>
