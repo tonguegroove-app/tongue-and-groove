@@ -207,6 +207,20 @@ export const SCENARIO_SENTENCES = {
     "I still get dizzy when I stand up from the stool.",
     "Could you please explain the plan for my speech clearly?",
     "I think my breathing and my throat feel better this month.",
+    // Rung 2 batch, 2026-08-25. Every pack held only 11-12 two-instance
+    // sentences against the 10 a set needs, so set 2 was near-identical every
+    // session. Each of these verified at exactly 2 instances of its category
+    // and p >= 4 before it went in.
+    "I think my breathing is worse at night.",
+    "Is this the right month for my thyroid test?",
+    "My throat feels stronger this week.",
+    "I still do my strength and stretching exercises.",
+    "My stomach hurts when I stand up.",
+    "Can you spell the name of that specialist?",
+    "My ankles are swelling and my knees feel stiff.",
+    "Could you print a copy of my drug list?",
+    "Could my drugs be causing this tremor?",
+    "I'd like a clear plan for the next six weeks.",
   ],
   rest: [
     "I have a reservation for six o'clock.",
@@ -308,6 +322,17 @@ export const SCENARIO_SENTENCES = {
     "Could you bring fresh bread and a green salad, please?",
     "I'd like the small steak with sweet potatoes, please.",
     "I think I'll thank the chef for the birthday cake.",
+    // Rung 2 batch, 2026-08-25 — see the note in `dr`.
+    "I think we'd like to sit near the north window.",
+    "Thanks — could we get another menu?",
+    "Could we start with the soup special?",
+    "Could I get a small spoon for my soup?",
+    "Could we have dessert last?",
+    "I'd like the salt and a moment to decide.",
+    "My friend would like the grilled fish.",
+    "I'd like to order the grilled trout.",
+    "Please hand me a clean napkin.",
+    "Could we split the last strawberry?",
   ],
   phone: [
     "Hello, may I speak with the billing department?",
@@ -373,6 +398,17 @@ export const SCENARIO_SENTENCES = {
     "I want to send the last payment and hold the rest.",
     "Could you please explain the flat monthly plan clearly?",
     "I still can't speak fast — could you stay on the line?",
+    // Rung 2 batch, 2026-08-25 — see the note in `dr`.
+    "Could you transfer me to the front desk?",
+    "I'd prefer that you print the bill.",
+    "Can you stay on the line while I get my statement?",
+    "I'd like to speak with someone about my statement.",
+    "Could you describe the strange charge on my account?",
+    "I'd like to stress that my instructions were clear.",
+    "Could you connect me to the billing department?",
+    "I'll contact you the moment I hear back.",
+    "Is there anything else I should authorize?",
+    "I think there's something wrong with my bill.",
   ],
   fam: [
     "The grandchildren are visiting this weekend.",
@@ -436,6 +472,17 @@ export const SCENARIO_SENTENCES = {
     "Can you bring fresh bread and green grapes to dinner?",
     "I'd like to call my brother and my mother this Thursday.",
     "I think they're coming this Thursday for my birthday.",
+    // Rung 2 batch, 2026-08-25 — see the note in `dr`.
+    "Would you close the blinds for me?",
+    "We're planning a picnic at the club.",
+    "Would you please play the piano for us?",
+    "I still swim on Sundays with my sister.",
+    "Would you stop by and stay for supper?",
+    "My grandson is getting stronger at street hockey.",
+    "I sent a gift for the wedding.",
+    "Could you drive me to my granddaughter's recital?",
+    "I can't attend the concert on Sunday.",
+    "Could you drive my grandson home?",
   ],
   shop: [
     "Which aisle has the frozen vegetables?",
@@ -497,6 +544,17 @@ export const SCENARIO_SENTENCES = {
     "I'd like to send back the last order and hold the rest.",
     "I'd like a fresh printed receipt for the cheaper brand.",
     "Could you please explain the discount clearly?",
+    // Rung 2 batch, 2026-08-25 — see the note in `dr`.
+    "Where can I find the strawberries and the string beans?",
+    "I need a street map and a strong shopping bag.",
+    "Do you think these are worth the price?",
+    "I think this month's sale ends on Sunday.",
+    "Where can I find the small spoons?",
+    "Could I speak to the store manager?",
+    "Could you bring a cart for my groceries?",
+    "Could you print my receipt from Friday?",
+    "Could you please place the eggs on top?",
+    "Could I please have a clean bag?",
   ],
   biz: [
     "Can we schedule the meeting for Thursday morning?",
@@ -563,6 +621,17 @@ export const SCENARIO_SENTENCES = {
     "I think I'll thank the whole team for another good month.",
     "Could you please explain the clear plan to the client?",
     "I'd like the printed proposal before the progress meeting.",
+    // Rung 2 batch, 2026-08-25 — see the note in `dr`.
+    "Could you send the report before noon?",
+    "Please connect me with the accounts team.",
+    "Would you include the client on the call?",
+    "I'd like a clean copy of the slides.",
+    "Thanks for covering my shift this month.",
+    "I'd like to discuss our strategy for stronger sales.",
+    "Could you describe the instructions in the email?",
+    "I'd like to schedule a staff meeting.",
+    "Could you scan the statement and send it over?",
+    "I sent the invoice to the wrong department.",
   ],
 };
 
