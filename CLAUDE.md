@@ -20,7 +20,12 @@ If CB confirms it IS options work: do it entirely inside `~/Projects/options-sit
 - **Session notes live in the vault:** `obsidian-vault/CB_Brain/Business Projects/Tongue and Groove/00-Session Notes.md` (dated `## YYYY-MM-DD — Title` sections, appended chronologically).
 - **The working PRD (`tongue-and-groove.md` in the repo root) is a symlink into the vault** — the real file is `.../Tongue and Groove/01-PRD-Requirements/Tongue and Groove Build PRD.md`. Edit it by either path; it's gitignored here because this repo is **public**, and backed up by the vault's (private) git. Keep planning/business docs out of this repo the same way.
 - **Word library is generated** — never hand-edit `src/words.gen.js` / `src/sentences.gen.js`. Pipeline: `python3 scripts/build_words.py` → `node scripts/tag_sentences.mjs` → `node scripts/build_library.mjs` (regenerates vault + repo Word Library docs).
-- **Word pool is cut at the top 1,500 most-used words** (`TOP_N` in `scripts/build_words.py`). Confirmed 2026-08-05: a 1,000 cut opens content gaps (TH 20→10, S-blends 23→13) — don't lower it without rechecking `vocab-audit.md`.
+- **Word pool has three admission routes**, all in `scripts/build_words.py`:
+  - `TOP_N = 1500` — the main band. Confirmed 2026-08-05: a 1,000 cut opens content gaps (TH 20→10, S-blends 23→13) — don't lower it without rechecking `vocab-audit.md`.
+  - `DEEP_N = 6000` — ranks 1,500–6,000, admitted only at tier 4–5. Raised from 3,000 on 2026-08-25 because the pool was starved in the categories the injury presets rate *highest* (3-consonant clusters had 16 words and stroke/TBI both rate that sound 5). 10,000 was measured and drifts academic — don't go deeper without rereading what it drags in.
+  - `LIFE_WORDS` — curated, exempt from rank *and* tier. For words a 65+ stroke/TBI patient says weekly that no frequency band reaches (`granddaughter` is rank 12,983).
+- **Gate 1 is absolute: a word with none of the six target sounds can never be a warm-up word.** `doctor`, `hospital`, `medicine`, `daughter`, `kitchen`, `insurance`, `family` all carry none. No list overrides this — those words can only reach the patient inside sentences. Check with `catOf(word)` before promising CB any specific word.
+- **Two different "usefulness" scores, don't confuse them.** `SENT_META.p` = how likely a patient is to *say that sentence* (`scripts/utility_score.mjs`); `WORD_META.u` = how likely a 65+ stroke/TBI patient is to *use that word* (`life_relevance()` in `build_words.py`). Frequency rank answers neither.
 
 ---
 
