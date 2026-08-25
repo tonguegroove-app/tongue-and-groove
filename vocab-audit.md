@@ -7,35 +7,35 @@ Two gates: (1) contains a cluster from the six categories; (2) automaticity guar
 | | words |
 |---|---|
 | Pool before filtering (all Gate-1 category members in top-1,500) | 541 |
-| Deleted | 342 |
-| Tier-4/5 depth additions from ranks 1,500-3,000 | 77 |
-| **Pool after filtering (tiers 2-5)** | **276** |
+| Deleted | 343 |
+| Tier-4/5 depth additions from ranks 1,500-6,000 | 300 |
+| **Pool after filtering (tiers 2-5)** | **548** |
 
-### Depth additions (ranks 1,500-3,000, admitted only when scoring tier 4-5)
+### Depth additions (ranks 1,500-6,000, admitted only when scoring tier 4-5)
 
-extremely, influence, background, completed, thousands, slightly, appreciate, description, electric, introduced, transfer, industrial, elements, buildings, girlfriend, increasing, relationships, transport, appropriate, interests, applications, approved, approximately, conflict, distribution, documents, friendly, requirements, residents, incredible, ministry, struggle, assembly, hundreds, improved, entertainment, statistics, controlled, explained, institutions, representative, transportation, employment, exclusive, frequently, electronic, expression, stronger, constant, attractive, represented, expressed, introduction, presidential, representatives, objects, statements, approval, aspects, functions, islands, republicans, scientists, appointment, improvement, settlement, consistent, represents, structures, symptoms, complicated, impressive, strongly, assessment, contrast, increases, infrastructure
+extremely, influence, background, completed, thousands, slightly, appreciate, description, electric, introduced, transfer, industrial, elements, buildings, girlfriend, increasing, relationships, transport, appropriate, interests, applications, approved, approximately, conflict, distribution, documents, friendly, requirements, residents, incredible, ministry, struggle, assembly, hundreds, improved, entertainment, statistics, controlled, explained, institutions, representative, transportation, employment, exclusive, frequently, electronic, expression, stronger, constant, attractive, represented, expressed, introduction, presidential, representatives, objects, statements, approval, aspects, functions, islands, republicans, scientists, appointment, improvement, settlement, consistent, represents, structures, symptoms, complicated, impressive, strongly, assessment, contrast, increases, infrastructure, administrative, enforcement, governments, components, expectations, explanation, replacement, electricity, electrical, establishment, explains, industries, principles, controls, presents, conclusion, congratulations, contracts, describes, participants, throwing, consists, contributed, entrance, friendship, translation, amendment, experiment, findings, increasingly, incredibly, subjects, agriculture, immigrants, improving, instructions, introduce, programming, comprehensive, destruction, extraordinary, representing, transferred, chemistry, concluded, impression, movements, screaming, agricultural, athletes, commonwealth, contribute, contribution, contributions, impressed, instant, photographs, principle, punishment, representation, restaurants, arguments, struggling, transmission, aggressive, complaint, instruments, registration, underground, announcement, attracted, discrimination, distributed, districts, engagement, implementation, presentation, restrictions, conversations, involvement, protecting, constructed, distinct, franchise, integrated, intelligent, journalists, recommendations, characteristics, highlights, judgment, stranger, concentration, improvements, investments, publications, addressed, concepts, controversy, instrument, spectrum, approaches, arrangement, newspapers, applying, exclusively, grandfather, professionals, arrangements, complaints, controversial, describing, explaining, implemented, opponents, completion, demonstrated, developments, explosion, integration, integrity, interpretation, streaming, transactions, unemployment, branches, campaigns, investigations, transaction, transformation, attract, demonstrate, departments, experiments, implement, influenced, paintings, protests, striking, terrorists, congressional, electronics, excitement, exploration, practically, restricted, spreading, threatening, widespread, assignment, contents, proceedings, structural, approaching, celebrating, compliance, contrary, controlling, illustrated, propaganda, simultaneously, accidents, appreciated, approached, interactions, introducing, presidency, strictly, accomplished, classroom, compromise, incidents, mathematics, productivity, screening, translated, abstract, contacts, grandmother, inflation, ingredients, instruction, northwest, statistical, strangers, activists, addresses, consultant, controller, households, understands, agreements, appreciation, athletic, complaining, preventing, strongest, attraction, establishing, grandma, intentions, reflects, conflicts, implications, seemingly, southwest, destroying, influential, surprisingly, thoroughly, treatments, contractor, contributing, frustrated, gambling, presenting, presidents, struggles, transformed, administrator, altogether, concentrate, inhabitants
 
 ## Count per category (a word can belong to several)
 
 | Category | words | gap? |
 |---|---|---|
-| TH sounds | 20 |  |
-| 3-consonant clusters | 16 | **CONTENT GAP — under 20** |
-| L-blends | 40 |  |
-| R-blends | 107 |  |
-| S-blends | 23 |  |
-| Final/mid clusters | 132 |  |
+| TH sounds | 41 |  |
+| 3-consonant clusters | 61 |  |
+| L-blends | 87 |  |
+| R-blends | 258 |  |
+| S-blends | 48 |  |
+| Final/mid clusters | 235 |  |
 
 ## Count per difficulty tier
 
 | Tier | words |
 |---|---|
-| 2 | 101 |
-| 3 | 82 |
-| 4 | 83 |
-| 5 | 10 |
+| 2 | 117 |
+| 3 | 103 |
+| 4 | 286 |
+| 5 | 42 |
 
-## Deleted words — 342, with reason
+## Deleted words — 343, with reason
 
 | Word | Reason |
 |---|---|
@@ -381,10 +381,7 @@ extremely, influence, background, completed, thousands, slightly, appreciate, de
 | wild | single-syllable |
 | camp | single-syllable |
 | cast | single-syllable |
-
-## Content gaps flagged
-
-- **3-consonant clusters**: only 16 qualifying words (< 20)
+| supper | life word, but carries none of the six sounds |
 
 ## Sentence ladder inventory (§6) — instances of the target sound per sentence
 

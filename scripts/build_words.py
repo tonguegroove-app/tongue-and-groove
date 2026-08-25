@@ -33,10 +33,22 @@ from wordfreq import top_n_list
 
 TOP_N = 1500       # 1,500 confirmed (CB 2026-08-05) — a 1,000 cut opens content
                    # gaps: TH drops 20→10, S-blends 23→13
-DEEP_N = 3000      # ranks 1,500-3,000: admitted ONLY if they score tier 4-5
+DEEP_N = 6000      # ranks 1,500-6,000: admitted ONLY if they score tier 4-5
                    # (the top-1,500 universe is short-word-heavy — without this
                    # the tier-5 pool is 2 words and the 6/9/9/6 warm-up spread
                    # is impossible; same idea as the old SLP additions)
+                   # Raised 3,000 → 6,000 on 2026-08-25. At 3,000 the pool held
+                   # 276 words and the categories the injury presets rate
+                   # HIGHEST were the starved ones: 3-consonant clusters 16
+                   # words (stroke and TBI both rate it 5), TH 20, S-blends 23,
+                   # against R-blends 107 and final clusters 132. Worse at tier
+                   # level — clusters had ONE tier-2 word, and TH had no tier-5
+                   # word at all. A stroke patient was cycling the same 16
+                   # words. 6,000 roughly triples the thin categories and the
+                   # words it adds are still everyday (chemistry, struggling,
+                   # stranger, grandmother, athletes). 10,000 was measured too
+                   # and drifts academic — algorithm, synthesis, manuscript —
+                   # so 6,000 is the edge of "words a patient would say".
 GUARD_RANK = 500   # automaticity guard applies below this filtered rank
 BAND_RANK = 1000   # top-1,000 band costs 1 difficulty point
 
@@ -64,7 +76,50 @@ STOP = {
     "google", "twitter", "youtube", "instagram", "iphone", "microsoft",
     "australian", "centre", "monday", "tuesday", "sunday", "january", "june",
     "july", "august", "september", "october", "november", "december",
+    # surfaced by the 6,000 band (2026-08-25) — people, places, brands
+    "anthony", "franklin", "massachusetts", "netherlands", "queensland",
+    "richmond", "switzerland", "thompson", "armstrong", "springfield",
+    "starbucks", "stockholm", "southampton", "matthews", "northwestern",
 }
+
+# Words a 65+ stroke or TBI patient actually uses, admitted regardless of
+# frequency rank or difficulty tier (CB 2026-08-25: "over-weight ones a stroke
+# or TBI patient would use, eg doctor, and for stroke let's assume they are
+# 65+, so things like granddaughter grandson").
+#
+# They still have to pass Gate 1 — a word with none of the six target sounds
+# can never be a warm-up word, and no list can change that. "doctor",
+# "hospital", "medicine", "daughter", "kitchen", "insurance", "family" and
+# "pension" all carry none of them; they live in the SENTENCES instead.
+#
+# What this list is for is the other two gates. "granddaughter" (rank 12,983)
+# and "grandson" (8,937) carry an R-blend but sit far past the frequency cut;
+# "therapy" (2,923) and "breakfast" (2,425) are inside it but were being thrown
+# out by the deep band's tier-4/5 rule. Both are the wrong reason to lose a
+# word this population says every week.
+LIFE_WORDS = {
+    # family
+    "granddaughter", "grandson", "grandchildren", "grandparents", "birthday",
+    # health and therapy
+    "therapy", "therapist", "prescription", "dentist", "swallow", "swallowing",
+    "breathing", "stretching", "strengthen", "stiffness", "stitches",
+    "thankful", "steady", "stumble",
+    # home and daily routine
+    "breakfast", "groceries", "grocery", "glasses", "blanket", "blankets",
+    "bathroom", "restroom", "upstairs", "downstairs", "laundry", "dressing",
+    "cleaning", "cleaner", "drawer", "freezer", "sweater", "slippers",
+    "toothbrush", "clothing", "supper", "strawberries",
+    # out and about
+    "neighbors", "crossing", "celebrate", "flowers", "crutches", "travel",
+    "driveway", "spelling", "crossword",
+}
+# The thin categories are thin for a reason — three-consonant clusters live
+# mostly in Latinate institutional words (administration, distribution,
+# infrastructure), which is exactly the register this population doesn't speak.
+# So the words above deliberately over-supply tri/sb/th with domestic
+# vocabulary: restroom, upstairs, downstairs, strawberries, stiffness,
+# toothbrush, supper. Without them a stroke patient's most-practised word is
+# "throughout".
 
 # Correction Spec v2 §1A: function words / articles / pronouns / prepositions /
 # auxiliaries never enter the pool, even when they carry a TH or a cluster
@@ -174,6 +229,74 @@ def place_switches(w):
 def is_place_switcher(w):
     return syllables(w) >= 3 and place_switches(w) >= 3
 
+
+# --- life relevance (u, 1-5) -----------------------------------------------
+# How likely this word is to come out of a 65+ stroke or TBI patient's mouth in
+# an ordinary week. Frequency rank does NOT answer that: "administration" and
+# "distribution" are common in a web corpus and rare in a living room, while
+# "granddaughter" is the reverse. Stored as `u` in WORD_META and used to weight
+# the warm-up draw, so the pool can be wide without the practice drifting into
+# newspaper vocabulary.
+#
+# Matched on ROOTS, not whole words, so inflections come along for free
+# ("grandchild/grandchildren", "treat/treatment/treatments").
+LIFE_ROOTS = (
+    # family and people close by
+    "grand", "brother", "sister", "husband", "wife", "parent", "child",
+    "friend", "neighbo", "birthday", "wedding", "famil",
+    # health, therapy, the body
+    "therap", "patient", "treat", "symptom", "prescri", "dentist", "medic",
+    "breath", "swallow", "healthy", "appointment", "hospital", "nurse",
+    "pressure", "strengthen", "stretch", "exercis", "recover",
+    # home and daily routine
+    "breakfast", "dinner", "kitchen", "bathroom", "bedroom", "blanket",
+    "clean", "cook", "laundry", "grocer", "glasses", "drawer", "freezer",
+    "cupboard", "curtain", "sweater", "slipper", "dressing", "garden",
+    "flowers", "weather", "weekend", "morning", "evening", "restroom",
+    "upstairs", "downstairs", "toothbrush", "clothing", "supper", "steady",
+    "stiffness", "stitches", "strawberr", "thankful", "stumble", "crossword",
+    "driveway", "spelling",
+    # getting around and getting things done
+    "walking", "driving", "travel", "crossing", "stairs", "crutch",
+    "restaurant", "library", "shopping", "prices", "payment", "account",
+    "telephone", "message", "address", "contact", "celebrate", "practice",
+    # the words of asking for help
+    "explain", "understand", "question", "complain", "appreciate", "grateful",
+    "together", "remember", "trouble", "problem", "comfort", "please",
+)
+# The other end: real English, but words this population is unlikely to say out
+# loud. Mostly politics, corporate process and academic abstraction — the exact
+# register a web-frequency list over-supplies.
+DISTANT_ROOTS = (
+    "administr", "infrastructur", "legislat", "congress", "presiden",
+    "republic", "democrat", "amendment", "constituen", "parliament",
+    "propaganda", "discriminat", "immigrant", "terroris", "activis",
+    "enforcement", "compliance", "implement", "procurement", "statistic",
+    "distribut", "productivity", "integrat", "transformation", "sector",
+    "corporat", "shareholder", "commodit", "municipal", "jurisdic",
+    "sovereign", "ideolog", "empirical", "theoretical", "methodolog",
+    "franchise", "gambling", "journalis", "gubernatorial", "gross",
+)
+ABSTRACT_END = re.compile(r"(ation|ations|ment|ments|ity|ities|ance|ence|ism|isms)$")
+
+
+def life_relevance(w, rank):
+    """1-5: how likely a 65+ patient is to use this word in ordinary life."""
+    if any(r in w for r in LIFE_ROOTS):
+        return 5
+    if any(r in w for r in DISTANT_ROOTS):
+        return 1
+    # Abstract nominalisations that didn't earn a life root: "arrangement",
+    # "expectations", "compliance". Real words, rarely spoken by this group.
+    if ABSTRACT_END.search(w):
+        return 2
+    # No life root, but common enough to be ordinary speech rather than
+    # newspaper vocabulary. Rank is a weak signal on its own — it is only
+    # trusted here, after the two lists above have had their say.
+    if rank < TOP_N:
+        return 4
+    return 3
+
 PS_HAND_LIST = [
     "buttercup", "basketball", "cucumber", "helicopter", "calculator",
     "refrigerator", "thermometer", "caterpillar", "watermelon", "motorcycle",
@@ -219,6 +342,25 @@ for rank, w in enumerate(words):
         continue
     kept.append((w, rank, cats, s, tier))
 
+# Life words that no frequency band would reach. Gate 1 still applies — a word
+# with none of the six sounds is not admissible here or anywhere.
+kept_set = {w for w, _, _, _, _ in kept}
+life_added = []
+deep_rank = {w: i for i, w in enumerate(top_n_list("en", 40000))}
+for w in sorted(LIFE_WORDS):
+    if w in kept_set or w in STOP or w in FUNCTION_WORDS:
+        continue
+    cats = [c for c, test in CATS.items() if test(w)]
+    if not cats:
+        deleted.append((w, "life word, but carries none of the six sounds"))
+        continue
+    if syllables(w) < 2:
+        deleted.append((w, "life word, but single-syllable"))
+        continue
+    s, tier = score_word(w, deep_rank.get(w, DEEP_N))
+    kept.append((w, deep_rank.get(w, DEEP_N), cats, s, max(tier, 2)))
+    life_added.append(w)
+
 by_cat = {c: [] for c in CATS}
 for w, rank, cats, s, tier in kept:
     for c in cats:
@@ -229,7 +371,8 @@ rank_of = {w: r for w, r, _, _, _ in kept}
 for c in by_cat:
     by_cat[c].sort(key=lambda w: (tier_of[w], rank_of[w]))
 
-meta = {w: {"t": tier, "y": syllables(w), "s": s, "c": cats}
+meta = {w: {"t": tier, "y": syllables(w), "s": s, "c": cats,
+            "u": life_relevance(w, rank)}
         for w, rank, cats, s, tier in kept}
 
 ps = [w for w in words[:TOP_N] if is_place_switcher(w)]
@@ -306,7 +449,8 @@ with open("src/words.gen.js", "w") as f:
     f.write("// GENERATED by scripts/build_words.py — do not edit by hand.\n")
     f.write("// Pool = two-gate filter (category membership + automaticity guard),\n")
     f.write("// tier 1 deleted. Per-category lists ordered tier-asc, then frequency.\n")
-    f.write("// WORD_META: { t: tier 2-5, y: syllables, s: raw score, c: categories }\n")
+    f.write("// WORD_META: { t: tier 2-5, y: syllables, s: raw score, c: categories,\n")
+    f.write("//   u: life relevance 1-5 for a 65+ stroke/TBI patient — see life_relevance() }\n")
     f.write("export const WORDS_BY_CAT = " + json.dumps(by_cat, separators=(",", ":")) + ";\n")
     f.write("export const WORD_META = " + json.dumps(meta, separators=(",", ":")) + ";\n")
     f.write("export const WORDS_PS = " + json.dumps(ps, separators=(",", ":")) + ";\n")

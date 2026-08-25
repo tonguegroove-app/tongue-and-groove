@@ -258,6 +258,19 @@ const tierCounts = (total, adj = 0) => {
 // short when practice is too hard and long when it's too easy.
 const SYL_PREF = { "-2": (y) => 1 / (y * y), "-1": (y) => 1 / y, "0": () => 1, "1": (y) => y, "2": (y) => y * y };
 const sylWeight = (w, adj) => SYL_PREF[String(Math.max(-2, Math.min(2, Math.round(adj))))](WORD_META[w]?.y || 2);
+// Life relevance (CB 2026-08-25: "over-weight ones a stroke or TBI patient
+// would use"). `u` is scored at build time — see life_relevance() in
+// scripts/build_words.py — and says how likely a 65+ patient is to say the
+// word in an ordinary week, which frequency rank does NOT answer:
+// "administration" is common in a web corpus and rare in a living room,
+// "granddaughter" is the reverse. Squared, like the sentence `p`. Measured over
+// 600 simulated stroke warm-ups: the draw narrows to one category and one tier
+// band BEFORE this applies, so the weight has less room than it looks — u^1
+// moves mean relevance 3.54 to 3.74, u^2 to 3.89, u^3 to 4.03. u^2 is the
+// knee: it costs almost nothing in variety (words covering 80% of the draw:
+// 198 unweighted, 192 at u^1, 181 at u^2) where u^3 starts narrowing it (165)
+// for a much smaller gain.
+const relWeight = (w) => { const u = WORD_META[w]?.u ?? 3; return u * u; };
 
 const WORDS_BY_TIER_CAT = {}; // tier -> cat -> [words]
 Object.keys(WORDS).forEach((c) => WORDS[c].forEach((w) => {
@@ -529,7 +542,7 @@ export default function App() {
         const cat = pickCat(ratings, avail);
         const cand = notRecent(WORDS_BY_TIER_CAT[t][cat].filter((w) => !used.has(w)));
         let tw = 0;
-        const ws = cand.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj); tw += wt; return wt; });
+        const ws = cand.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj) * relWeight(w); tw += wt; return wt; });
         let r = Math.random() * tw;
         for (let i = 0; i < cand.length; i++) { r -= ws[i]; if (r <= 0) return cand[i]; }
         return cand[cand.length - 1];
@@ -612,7 +625,7 @@ export default function App() {
     const fresh = pool.filter((w) => !sessWordsRef.current.has(w)); // no repeats in a session
     const p = notRecent(fresh.length ? fresh : pool);
     let total = 0;
-    const ws = p.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj); total += wt; return wt; });
+    const ws = p.map((w) => { const wt = hardWeight(stats[w]) * sylWeight(w, diffAdj) * relWeight(w); total += wt; return wt; });
     let r = Math.random() * total;
     for (let i = 0; i < p.length; i++) { r -= ws[i]; if (r <= 0) return p[i]; }
     return p[p.length - 1];
