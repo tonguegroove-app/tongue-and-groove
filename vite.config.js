@@ -2,6 +2,13 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { execSync } from "child_process";
+import { fileURLToPath } from "node:url";
+
+// Two build targets from one source tree:
+//   npm run build         → GitHub Pages PWA, unchanged from before
+//   npm run build:native  → asset payload for the Capacitor iOS/Android shell
+// TG_NATIVE=1 is the only switch. Everything conditional on it is below.
+const NATIVE = process.env.TG_NATIVE === "1";
 
 // Build stamp, shown at the bottom of Settings. This app is an installed PWA,
 // so a phone can keep running an old bundle after a fix ships — twice now a bug
@@ -18,11 +25,28 @@ const stamp = (() => {
 })();
 
 export default defineConfig({
-  base: "/tongue-and-groove/",
-  define: { __BUILD__: JSON.stringify(stamp) },
+  // A native build is loaded from the app bundle over capacitor://, where an
+  // absolute "/tongue-and-groove/" prefix resolves to nothing.
+  base: NATIVE ? "./" : "/tongue-and-groove/",
+  define: {
+    __BUILD__: JSON.stringify(stamp),
+    __NATIVE__: JSON.stringify(NATIVE),
+  },
+  resolve: {
+    alias: NATIVE
+      ? [{
+          find: "virtual:pwa-register",
+          replacement: fileURLToPath(new URL("./src/pwa-stub.js", import.meta.url)),
+        }]
+      : [],
+  },
+  build: { outDir: NATIVE ? "dist-native" : "dist" },
   plugins: [
     react(),
-    VitePWA({
+    // The service worker is web-only. Inside the native shell the App Store is
+    // the update mechanism, and a second cache layer there causes exactly the
+    // stale-bundle problem the build stamp exists to diagnose.
+    ...(NATIVE ? [] : [VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/apple-touch-icon.png"],
       manifest: {
@@ -42,24 +66,10 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,png,svg,ico}"],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "google-fonts-css" }
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\//,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-files",
-              expiration: { maxEntries: 20, maxAgeSeconds: 31536000 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
-          }
-        ]
+        // woff2 added: the fonts are bundled now, so they must be precached
+        // alongside the rest of the app or an offline cold start has no type.
+        globPatterns: ["**/*.{js,css,html,png,svg,ico,woff2}"]
       }
-    })
+    })])
   ]
 });

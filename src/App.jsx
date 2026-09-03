@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { WORDS, WORD_META, PAIRS, SENTENCES, CATS, MILESTONES, GOALS, SCENARIOS, CONDITIONS, PRESETS, SCENARIO_SENTENCES, VARIANTS, COND_VARIANT, targetsOf, topTarget, cleanToken } from "./data.js";
 import { SENT_META } from "./sentences.gen.js";
-import { loadState, saveState, dkey } from "./storage.js";
+import { loadState, saveState, flushState, dkey } from "./storage.js";
+import { NATIVE, keepAwake, allowSleep, tickHaptic,
+         remindersAvailable, requestReminderPermission,
+         scheduleDailyReminder, cancelDailyReminder } from "./platform.js";
 
 const saved = loadState();
 
@@ -333,6 +336,9 @@ export default function App() {
   // saved and restored, so the slider is only touched once.
   const [wpm, setWpm] = useState(saved?.wpm ?? 30);
   const [tickOn, setTickOn] = useState(saved?.tickOn ?? false); // metronome tick on each auto-paced word
+  // Daily practice reminder (native builds only — see platform.js).
+  const [reminderOn, setReminderOn] = useState(saved?.reminderOn ?? false);
+  const [reminderAt, setReminderAt] = useState(saved?.reminderAt ?? "09:00");
   const [playing, setPlaying] = useState(false);
   const [item, setItem] = useState(null);
   const [setSize, setSetSize] = useState(saved?.setSize ?? 25); // 25–150 in blocks of 25
@@ -366,7 +372,6 @@ export default function App() {
   const rearmRef = useRef(null); // set by the paced effect; lets Next restart the hold
   const itemRef = useRef(null);
   const doneRef = useRef(0);
-  const wakeRef = useRef(null);
   const marksAppliedRef = useRef(true); // false only while a fresh summary awaits its hard-word taps
   const recentRef = useRef(saved?.recent ?? []); // last RECENT_GAP item keys, to space out repeats
   // No-repeat rule (CB 2026-08-19). A SESSION is the warm-up word set plus the
@@ -431,7 +436,7 @@ export default function App() {
   const ensureAudio = () => {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    if (!audioRef.current) audioRef.current = new Ctx();
+    if (!audioRef.current) audioRef.current = new Ctx({ latencyHint: "interactive" });
     const ctx = audioRef.current;
     if (ctx.state !== "running") ctx.resume();
     // iOS only unlocks audio if a source starts inside the tap — play a silent sample
@@ -499,8 +504,8 @@ export default function App() {
 
   // persist everything that should survive a close (A8 / M-persist)
   useEffect(() => {
-    saveState({ ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj, recent: recentRef.current });
-  }, [ratings, paced, wpm, tickOn, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj]);
+    saveState({ ratings, paced, wpm, tickOn, reminderOn, reminderAt, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj, recent: recentRef.current });
+  }, [ratings, paced, wpm, tickOn, reminderOn, reminderAt, setSize, dark, fontScale, feedbackOn, totalWords, hist, iosHintDismissed, wordStats, scenario, lastRescoreSets, condition, variant, useRec, manualRatings, diffChecks, sessDone, warmAskDay, sumAskDay, sumAskSess, diffAdj]);
 
   // §8 bugfix: whenever "Use recommended" is on, the ratings ARE the current
   // condition's preset — enforced here (not just at screen transitions) so the
@@ -813,7 +818,7 @@ export default function App() {
       const step = () => {
         if (!alive) return;
         next();
-        if (tickOn) playTick();
+        if (tickOn) { playTick(); tickHaptic(); }
         arm();
       };
       // Tapping Next mid-drill advances the item but used to leave the running
@@ -827,7 +832,7 @@ export default function App() {
       // Bonus Round the first sentence used to vanish the instant you pressed
       // Start (CB 2026-08-19). The clock now begins on the item you're reading.
       if (itemRef.current && !sessRef.current?.brk) {
-        if (tickOn) playTick();
+        if (tickOn) { playTick(); tickHaptic(); }
         arm();
       } else step();
       return () => { alive = false; rearmRef.current = null; clearTimeout(timerRef.current); };
@@ -835,19 +840,28 @@ export default function App() {
     return () => clearTimeout(timerRef.current);
   }, [playing, wpm, mode, ratings, paced, tickOn]);
 
-  // M1 — keep the screen awake during a paced drill; release on pause/unmount
+  // M1 — keep the screen awake during a paced drill; release on pause/unmount.
+  // Routed through platform.js because navigator.wakeLock does not exist in
+  // WKWebView: on the packaged iOS build the screen would otherwise sleep
+  // mid-drill, exactly when both hands are busy.
   useEffect(() => {
-    if (playing && "wakeLock" in navigator) {
-      navigator.wakeLock.request("screen").then((l) => { wakeRef.current = l; }).catch(() => {});
-    }
-    return () => {
-      if (wakeRef.current) { wakeRef.current.release().catch(() => {}); wakeRef.current = null; }
-    };
+    if (playing) keepAwake();
+    return () => { allowSleep(); };
   }, [playing]);
 
-  // M2 — auto-pause when the app is backgrounded; never silently resume
+  // Reminder scheduling. No-ops on web, where remindersAvailable() is false.
   useEffect(() => {
-    const onHide = () => { if (document.hidden) setPlaying(false); };
+    if (!remindersAvailable()) return;
+    if (!reminderOn) { cancelDailyReminder(); return; }
+    const [h, m] = reminderAt.split(":").map(Number);
+    if (Number.isFinite(h) && Number.isFinite(m)) scheduleDailyReminder(h, m);
+  }, [reminderOn, reminderAt]);
+
+  // M2 — auto-pause when the app is backgrounded; never silently resume.
+  // Also flushes the durable state mirror: on native the write is debounced,
+  // and iOS can suspend the app before the timer fires.
+  useEffect(() => {
+    const onHide = () => { if (document.hidden) { setPlaying(false); flushState(); } };
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
@@ -966,7 +980,6 @@ export default function App() {
   const togglePaced = () => { setPlaying(false); setPaced((p) => !p); };
 
   const css = `
-    @import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:wght@600;700&display=swap');
     * { box-sizing: border-box; margin: 0; }
     .app { min-height: 100vh; min-height: 100dvh; background: ${T.bg}; background-image: ${T.tex}; color: ${T.ink}; font-family: 'Atkinson Hyperlegible', sans-serif; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
     .app button:focus-visible, .app input:focus-visible { outline: 3px solid ${T.blue}; outline-offset: 2px; }
@@ -1372,6 +1385,28 @@ export default function App() {
               <span className={"track" + (feedbackOn ? " on" : "")}><span className="knob" /></span>
             </button>
           </div>
+          {/* Native only: a browser cannot fire a scheduled notification while
+              closed, so there is nothing honest to show on the web build. */}
+          {remindersAvailable() && (
+            <div className="setting">
+              <span className="setLbl">Daily practice reminder</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {reminderOn && (
+                  <input type="time" value={reminderAt} aria-label="Reminder time"
+                    onChange={(e) => setReminderAt(e.target.value)}
+                    style={{ fontFamily: "'Atkinson Hyperlegible'", fontSize: S(16), padding: "6px 8px",
+                             borderRadius: 10, border: "1.5px solid " + T.line, background: T.card, color: T.ink }} />
+                )}
+                <button className="switch" aria-pressed={reminderOn} aria-label="Daily practice reminder"
+                  onClick={async () => {
+                    if (!reminderOn && !(await requestReminderPermission())) return; // denied — leave the switch off
+                    setReminderOn((r) => !r);
+                  }}>
+                  <span className={"track" + (reminderOn ? " on" : "")}><span className="knob" /></span>
+                </button>
+              </div>
+            </div>
+          )}
           <div className="setting">
             <span className="setLbl">Sound ratings — what's hard right now</span>
             <button className="hdrBtn" onClick={() => { setPlaying(false); setScreen("assess"); }}>Edit</button>
@@ -1382,15 +1417,30 @@ export default function App() {
               <button className="hdrBtn" onClick={goRescore}>See</button>
             </div>
           )}
+          {/* Kept deliberately plain and non-clinical. The app never claims to
+              diagnose, treat or rehabilitate anything — it paces practice. That
+              is both true and what keeps the listing out of App Store review's
+              health-claims lane (guideline 1.4.1). */}
+          <div className="setting" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+            <span className="setLbl">About this app</span>
+            <p className="sub" style={{ margin: "2px 0 4px", fontWeight: 400 }}>
+              Tongue &amp; Groove is a practice tool for pacing your own speech drills.
+              It is not a medical device, and it does not diagnose or treat any condition.
+              It is not a substitute for care from a speech-language pathologist.
+              Everything you do stays on this device.
+            </p>
+          </div>
           {/* Which build is actually running. An installed PWA can keep serving
               an old bundle after a fix ships, so this is here to be read aloud
               when something looks unfixed. */}
           <div className="setting">
             <span className="setLbl" style={{ color: T.mut, fontWeight: 400, fontSize: S(14) }}>Version {BUILD}</span>
-            <button className="hdrBtn" style={{ background: "none", color: T.blue, border: "1.5px solid " + T.line }}
-              onClick={() => { if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.update()))).finally(() => window.location.reload(true)); else window.location.reload(true); }}>
-              Check for update
-            </button>
+            {!NATIVE && (
+              <button className="hdrBtn" style={{ background: "none", color: T.blue, border: "1.5px solid " + T.line }}
+                onClick={() => { if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.update()))).finally(() => window.location.reload(true)); else window.location.reload(true); }}>
+                Check for update
+              </button>
+            )}
           </div>
         </div>
         <SizeRow />
@@ -1707,7 +1757,7 @@ export default function App() {
               <button className="switch" onClick={() => {
                 const on = !tickOn;
                 setTickOn(on);
-                if (on) { ensureAudio(); setTimeout(playTick, 120); } // audible confirmation
+                if (on) { ensureAudio(); setTimeout(() => { playTick(); tickHaptic(); }, 120); } // audible + felt confirmation
               }} aria-pressed={tickOn} aria-label="Pacing tick sound">
                 <span className={"track" + (tickOn ? " on" : "")}><span className="knob" /></span>
                 <span className="swLbl">Tick</span>
